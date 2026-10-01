@@ -1,0 +1,42 @@
+{
+  "name": "verbo",
+  "version": "2.4.1",
+  "description": "Голосовой ввод, перевод и озвучивание текста для Windows",
+  "main": "out/main/index.js",
+  "author": "Никита",
+  "private": true,
+  "scripts": {
+    "postinstall": "install-electron",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "helper": "node scripts/build-paste-helper.mjs",
+    "icons": "node scripts/gen-icons.mjs",
+    "sync": "node scripts/sync-onedrive.mjs",
+    "test": "vitest run --no-file-parallelism",
+    "engine": "node scripts/fetch-engine.mjs",
+    "dist": "npm run build && npm run helper && npm run engine && electron-builder --win"
+  },
+  "dependencies": {
+    "msedge-tts": "^2.0.7",
+    "uiohook-napi": "^1.5.4",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.16.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.7",
+    "electron-vite": "^5.0.0",
+    "png-to-ico": "^2.1.8",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sharp": "^0.35.3",
+    "typescript": "^5.6.3",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.10"
+  }
+}

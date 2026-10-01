@@ -1,0 +1,7 @@
+node_modules/
+out/
+dist-installer/
+resources/paste-helper/PasteHelper.exe
+resources/icons/*.png
+resources/icons/*.ico
+resources/whisper-engine/

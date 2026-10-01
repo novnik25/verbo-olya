@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Знак Verbo: скруглённый квадрат и «V», собранная из двух штрихов —
+       она же читается как галочка речевой волны. Минимум деталей: остаётся
+       различимой на 16 пикселях. -->
+  <rect width="256" height="256" rx="58" fill="#15181b"/>
+  <path d="M74 84 L128 178" stroke="#4fbf9b" stroke-width="26" stroke-linecap="round"/>
+  <path d="M182 84 L128 178" stroke="#edeff1" stroke-width="26" stroke-linecap="round"/>
+  <circle cx="128" cy="62" r="13" fill="#4fbf9b"/>
+</svg>

@@ -1,0 +1,41 @@
+appId: com.voxflow.app
+productName: Verbo
+npmRebuild: false # uiohook-napi ставится с готовым N-API-бинарём; пересборка требует VS Build Tools
+directories:
+  output: dist-installer
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: resources/paste-helper/PasteHelper.exe
+    to: paste-helper/PasteHelper.exe
+  - from: resources/icons/tray.png
+    to: icons/tray.png
+  # распознавание текста на изображении (Windows.Media.Ocr)
+  - from: resources/ocr/ocr.ps1
+    to: ocr/ocr.ps1
+  # встроенный движок локального распознавания (whisper.cpp v1.9.2 BLAS):
+  # «Скачать локальный движок» берёт его отсюда, из сети качается только модель
+  - from: resources/whisper-engine
+    to: whisper-engine
+win:
+  target: nsis
+  icon: resources/icons/icon.ico
+nsis:
+  # полноценный мастер установки: выбор папки + страница ярлыков (build/installer.nsh)
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  installerLanguages:
+    - ru_RU
+  language: "1049"
+  artifactName: Verbo-Setup-${version}.exe
+  createDesktopShortcut: false
+  createStartMenuShortcut: false
+  include: build/installer.nsh
+  # оформление мастера в теме приложения (scripts/gen-installer-art.mjs)
+  installerHeader: build/installer-header.bmp
+  installerSidebar: build/installer-sidebar.bmp
+  uninstallerSidebar: build/installer-sidebar.bmp
+  installerHeaderIcon: resources/icons/icon.ico
+  runAfterFinish: true
