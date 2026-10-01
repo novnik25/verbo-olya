@@ -7,10 +7,12 @@
 ; Переопределять цвета MUI отсюда нельзя: макрос подключается уже после MUI2.nsh.
 
 
-; Перед установкой закрываем работающую Verbo сами: иначе установщик
-; спотыкается на «Не удалось закрыть Verbo» и ставит старую версию поверх.
+; Перед установкой закрываем работающую версию для Оли сами: иначе установщик
+; спотыкается на «Не удалось закрыть» и ставит старую версию поверх.
+; Закрываем ТОЛЬКО VerboOlya.exe: основной Verbo (Verbo.exe) на том же
+; компьютере трогать нельзя — установка не должна обрывать чужую работу.
 !macro customInit
-  nsExec::Exec 'taskkill /F /IM Verbo.exe /T'
+  nsExec::Exec 'taskkill /F /IM VerboOlya.exe /T'
   Pop $0
   Sleep 700
 !macroend
@@ -25,7 +27,7 @@
   Page custom ShortcutsPageCreate ShortcutsPageLeave
 
   Function ShortcutsPageCreate
-    !insertmacro MUI_HEADER_TEXT "Ярлыки программы" "Укажите, где разместить ярлыки Verbo"
+    !insertmacro MUI_HEADER_TEXT "Ярлыки программы" "Укажите, где разместить ярлыки Verbo для Оли"
     nsDialogs::Create 1018
     Pop $0
     ${NSD_CreateCheckbox} 0 12u 100% 12u "Разместить ярлык на рабочем столе"
@@ -45,14 +47,15 @@
 
 !macro customInstall
   ${If} $DesktopChecked = 1
-    CreateShortCut "$DESKTOP\Verbo.lnk" "$INSTDIR\Verbo.exe"
+    CreateShortCut "$DESKTOP\Verbo для Оли.lnk" "$INSTDIR\VerboOlya.exe"
   ${EndIf}
   ${If} $StartMenuChecked = 1
-    CreateShortCut "$SMPROGRAMS\Verbo.lnk" "$INSTDIR\Verbo.exe"
+    CreateShortCut "$SMPROGRAMS\Verbo для Оли.lnk" "$INSTDIR\VerboOlya.exe"
   ${EndIf}
 !macroend
 
+; удаляем только свои ярлыки: ярлыки основного Verbo называются иначе и остаются
 !macro customUnInstall
-  Delete "$DESKTOP\Verbo.lnk"
-  Delete "$SMPROGRAMS\Verbo.lnk"
+  Delete "$DESKTOP\Verbo для Оли.lnk"
+  Delete "$SMPROGRAMS\Verbo для Оли.lnk"
 !macroend

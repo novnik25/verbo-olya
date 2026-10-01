@@ -1,6 +1,6 @@
 import { BrowserWindow, screen, session } from 'electron'
 import { join } from 'path'
-import { APP_NAME } from '../shared/app'
+import { APP_TITLE } from '../shared/app'
 
 const preload = join(__dirname, '../preload/index.js')
 
@@ -64,7 +64,7 @@ export function createMainWindow(show: boolean, theme: 'dark' | 'light'): Browse
     minHeight: 560,
     show,
     autoHideMenuBar: true,
-    title: APP_NAME,
+    title: APP_TITLE,
     // системная полоса заголовка перекрашена под тему приложения:
     // прячем рамку, а родные кнопки (свернуть/развернуть/закрыть) рисуем поверх в цветах темы
     titleBarStyle: 'hidden',

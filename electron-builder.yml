@@ -1,5 +1,9 @@
-appId: com.voxflow.app
-productName: Verbo
+# Отдельная сборка «Verbo для Оли». Идентификатор и имя НАМЕРЕННО не совпадают
+# с основным Verbo (com.voxflow.app / Verbo): иначе установка на тот же
+# компьютер перезаписала бы основную программу, её запись в «Приложениях»
+# и ярлыки.
+appId: com.verbo.olya
+productName: VerboOlya
 npmRebuild: false # uiohook-napi ставится с готовым N-API-бинарём; пересборка требует VS Build Tools
 directories:
   output: dist-installer
@@ -29,7 +33,9 @@ nsis:
   installerLanguages:
     - ru_RU
   language: "1049"
-  artifactName: Verbo-Setup-${version}.exe
+  artifactName: Verbo-Olya-Setup-${version}.exe
+  # имя в «Приложениях» Windows — человеческое, а не имя файла VerboOlya.exe
+  uninstallDisplayName: Verbo для Оли ${version}
   createDesktopShortcut: false
   createStartMenuShortcut: false
   include: build/installer.nsh

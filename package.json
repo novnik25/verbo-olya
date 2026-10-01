@@ -1,7 +1,7 @@
 {
-  "name": "verbo",
-  "version": "2.4.1",
-  "description": "Голосовой ввод, перевод и озвучивание текста для Windows",
+  "name": "verbo-olya",
+  "version": "1.0.0",
+  "description": "Verbo для Оли — перевод с транскрипцией, голосовой ввод и чтение вслух для Windows",
   "main": "out/main/index.js",
   "author": "Никита",
   "private": true,
@@ -11,7 +11,6 @@
     "build": "electron-vite build",
     "helper": "node scripts/build-paste-helper.mjs",
     "icons": "node scripts/gen-icons.mjs",
-    "sync": "node scripts/sync-onedrive.mjs",
     "test": "vitest run --no-file-parallelism",
     "engine": "node scripts/fetch-engine.mjs",
     "dist": "npm run build && npm run helper && npm run engine && electron-builder --win"

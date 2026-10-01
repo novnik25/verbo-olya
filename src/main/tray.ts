@@ -1,6 +1,6 @@
 import { Menu, Tray, nativeImage } from 'electron'
 import { existsSync } from 'fs'
-import { APP_NAME } from '../shared/app'
+import { APP_TITLE } from '../shared/app'
 import { OUTPUT_LANG_LABELS } from '../shared/lang'
 import type { OutputLang } from '../shared/lang'
 
@@ -22,7 +22,7 @@ export function setupTray(opts: {
     ? nativeImage.createFromPath(opts.iconPath)
     : nativeImage.createEmpty()
   const tray = new Tray(icon)
-  tray.setToolTip(`${APP_NAME} — голосовой ввод, перевод и озвучивание`)
+  tray.setToolTip(`${APP_TITLE} — перевод с транскрипцией, голосовой ввод и озвучивание`)
 
   // состояние паузы живёт здесь: меню перестраивается, галочка не должна сбрасываться
   let paused = false
@@ -31,7 +31,7 @@ export function setupTray(opts: {
     const current = opts.getOutputLang()
     tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: `Открыть ${APP_NAME}`, click: opts.onOpen },
+        { label: `Открыть ${APP_TITLE}`, click: opts.onOpen },
         {
           label: 'Приостановить горячие клавиши',
           type: 'checkbox',

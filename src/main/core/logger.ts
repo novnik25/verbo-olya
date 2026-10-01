@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, renameSync, statSync } from 'fs'
 import { dirname, join } from 'path'
-import { APP_NAME } from '../../shared/app'
+import { APP_TITLE } from '../../shared/app'
 
 /**
  * Простой журнал в %APPDATA%\VoxFlow\voxflow.log — чтобы разбирать проблемы
@@ -18,7 +18,7 @@ export function initLog(dataDir: string): void {
   } catch {
     /* файла ещё нет — нормально */
   }
-  log(`=== запуск ${APP_NAME} ===`)
+  log(`=== запуск ${APP_TITLE} ===`)
 }
 
 /**

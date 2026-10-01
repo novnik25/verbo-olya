@@ -35,6 +35,9 @@ import { registerIpc } from './ipc'
 import { initLog, log } from './core/logger'
 import { makeKeyCrypto } from './core/key-crypto'
 
+// Замок берётся по папке, производной от name в package.json, — ДО setPath ниже.
+// Поэтому у версии для Оли там своё имя (verbo-olya): с прежним «verbo» она молча
+// выходила бы, пока на том же компьютере запущен основной Verbo.
 if (!app.requestSingleInstanceLock()) {
   // немедленный выход: второй экземпляр не должен дойти до whenReady и сервисов
   app.exit(0)
@@ -61,10 +64,12 @@ process.on('unhandledRejection', (reason) => {
   }
 })
 
-// идентификатор и папка данных остались от прежнего имени приложения и НЕ
-// зависят от APP_NAME: смена пути потеряла бы настройки, историю и ключ
-app.setAppUserModelId('com.voxflow.app')
-app.setPath('userData', join(app.getPath('appData'), 'VoxFlow'))
+// Свои идентификатор и папка данных, НЕ как у основного Verbo (com.voxflow.app,
+// %AppData%\VoxFlow): общая папка смешала бы настройки, историю и ключ двух
+// программ, а общий идентификатор — их уведомления и запись автозапуска.
+// Идентификатор совпадает с appId в electron-builder.yml.
+app.setAppUserModelId('com.verbo.olya')
+app.setPath('userData', join(app.getPath('appData'), 'VerboOlya'))
 
 const dataDir = app.getPath('userData')
 initLog(dataDir)

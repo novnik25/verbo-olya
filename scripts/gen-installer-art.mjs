@@ -41,7 +41,8 @@ const header = `
 <svg xmlns="http://www.w3.org/2000/svg" width="150" height="57">
   <rect width="150" height="57" fill="${BG}"/>
   ${waveMark(4, 3, 40)}
-  <text x="46" y="34" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600" fill="${INK}">Verbo</text>
+  <text x="46" y="28" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600" fill="${INK}">Verbo</text>
+  <text x="46" y="43" font-family="Segoe UI, sans-serif" font-size="10.5" fill="${ACCENT}">для Оли</text>
 </svg>`
 
 const sidebar = `
@@ -56,9 +57,10 @@ const sidebar = `
   <circle cx="140" cy="40" r="110" fill="${ACCENT}" opacity="0.05"/>
   ${waveMark(11, 72, 72)}
   <text x="30" y="176" font-family="Segoe UI, sans-serif" font-size="22" font-weight="600" fill="${INK}">Verbo</text>
-  <text x="30" y="200" font-family="Segoe UI, sans-serif" font-size="11" fill="${MUTED}">Голос · Перевод</text>
-  <text x="30" y="216" font-family="Segoe UI, sans-serif" font-size="11" fill="${MUTED}">Озвучивание</text>
-  <rect x="30" y="240" width="42" height="2" rx="1" fill="${ACCENT}"/>
+  <text x="30" y="197" font-family="Segoe UI, sans-serif" font-size="13" font-weight="600" fill="${ACCENT}">для Оли</text>
+  <text x="30" y="222" font-family="Segoe UI, sans-serif" font-size="11" fill="${MUTED}">Перевод · Транскрипция</text>
+  <text x="30" y="238" font-family="Segoe UI, sans-serif" font-size="11" fill="${MUTED}">Голос · Озвучивание</text>
+  <rect x="30" y="258" width="42" height="2" rx="1" fill="${ACCENT}"/>
 </svg>`
 
 /** Пишет 24-битный BMP (BI_RGB): строки снизу вверх, выравнивание по 4 байта. */

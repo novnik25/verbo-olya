@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react'
-import { APP_NAME } from '../../shared/app'
+import { APP_NAME, APP_TITLE } from '../../shared/app'
 import { MARK, markPaths } from '../../shared/mark'
 import type { SettingsPublic } from '../../shared/types'
 import { vox } from './api'
@@ -131,7 +131,7 @@ export function App(): JSX.Element {
           )}
           <span>{settings.theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}</span>
         </button>
-        {version && <div className="version-tag">{APP_NAME} {version}</div>}
+        {version && <div className="version-tag">{APP_TITLE} {version}</div>}
       </nav>
       <main className="content">
         {tab === 'history' && <HistoryPage />}
