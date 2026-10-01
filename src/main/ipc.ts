@@ -4,6 +4,7 @@ import { join } from 'path'
 import { APP_NAME } from '../shared/app'
 import { IPC } from '../shared/types'
 import type { SettingsPublic, KeyExportResult, KeyImportResult } from '../shared/types'
+import type { PhoneticsReply } from '../shared/phonetics'
 import { MIN_PASSPHRASE, packKeyFile, unpackKeyFile } from './core/key-file'
 import type { SettingsService } from './core/settings'
 import type { HistoryService } from './core/history'
@@ -32,6 +33,7 @@ export function registerIpc(deps: {
   translateReplace: () => Promise<void>
   translateClose: () => void
   translateRun: (text: string, targetLang: string) => Promise<{ ok: boolean; result?: string; message?: string }>
+  phonetics: (text: string, lang?: string) => Promise<PhoneticsReply>
   ocrImage: (data: Buffer) => Promise<{
     ok: boolean
     text: string
@@ -101,6 +103,11 @@ export function registerIpc(deps: {
 
   ipcMain.handle(IPC.translateRun, (_e, payload: { text: string; targetLang: string }) =>
     deps.translateRun(payload.text, payload.targetLang)
+  )
+  // транскрипция для вкладки «Переводчик»: окно спрашивает её отдельно от перевода,
+  // чтобы перевод показывался сразу, не дожидаясь значков
+  ipcMain.handle(IPC.phoneticsGet, (_e, payload: { text: string; lang?: string }) =>
+    deps.phonetics(String(payload?.text ?? ''), payload?.lang)
   )
   ipcMain.handle(IPC.translationsList, (_e, search?: string) => deps.translations.list(search, 50))
   ipcMain.handle(IPC.translationsDelete, (_e, id: string) => deps.translations.delete(id))

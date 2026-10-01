@@ -344,10 +344,7 @@ function Overlay(): JSX.Element | null {
     const результат = state.result
     return (
       <TranslatePanel
-        target={state.target}
-        result={результат}
-        loading={state.loading}
-        error={state.error}
+        view={state}
         toast={toast}
         onClose={() => {
           api.overlayMouse({ interactive: false })

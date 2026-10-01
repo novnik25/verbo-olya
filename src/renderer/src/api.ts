@@ -7,6 +7,7 @@ import type {
   KeyExportResult,
   KeyImportResult
 } from '../../shared/types'
+import type { PhoneticsReply } from '../../shared/phonetics'
 
 export interface VoxApi {
   getSettings(): Promise<SettingsPublic>
@@ -38,6 +39,7 @@ export interface VoxApi {
     engineMissing?: boolean
   }>
   translateRun(text: string, targetLang: string): Promise<{ ok: boolean; result?: string; message?: string }>
+  phonetics(text: string, lang?: string): Promise<PhoneticsReply>
   listTranslations(search?: string): Promise<TranslationEntry[]>
   deleteTranslation(id: string): Promise<void>
   clearTranslations(): Promise<void>

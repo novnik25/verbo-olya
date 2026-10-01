@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SettingsPublic, TranslationEntry } from '../../../shared/types'
 import { cyrShare, TRANSLATE_LANGS } from '../../../shared/lang'
+import { PHONETICS_STYLES, phoneticsLine } from '../../../shared/phonetics'
+import type { Phonetics, PhoneticsReply, PhoneticsStyle } from '../../../shared/phonetics'
 import { vox } from '../api'
+import { PhoneticText } from '../components/PhoneticText'
 import { truncate } from './translateHelpers'
 
 const stroke = {
@@ -79,6 +82,52 @@ function langBadge(code: string): string {
   return TRANSLATE_LANGS.find((l) => l.code === code)?.label ?? code
 }
 
+/** Транскрипция обеих сторон перевода; у стороны её нет, если та русская. */
+interface PhonState {
+  source?: Phonetics
+  result?: Phonetics
+  /** тексты, к которым относятся значки: «Слушать» читает именно их */
+  sourceText?: string
+  resultText?: string
+  pending: boolean
+  note?: string
+}
+
+/** Иностранный текст со значками, кнопками «Слушать» и «Копировать транскрипцию». */
+function PhonBlock(props: {
+  title: string
+  phonetics: Phonetics
+  text: string
+  style: PhoneticsStyle
+}): JSX.Element {
+  const [copied, setCopied] = useState(false)
+  const copy = async (): Promise<void> => {
+    await vox.copyText(phoneticsLine(props.phonetics, props.style))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  return (
+    <div className="phon-block">
+      <div className="phon-block-head">
+        <span className="phon-block-title">{props.title}</span>
+        <div className="phon-block-actions">
+          <button className="btn secondary" onClick={() => void vox.speakText(props.text)}>
+            <IconSpeaker /> Слушать
+          </button>
+          <button
+            className="btn secondary"
+            title="Скопировать транскрипцию в квадратных скобках — как пишут в тетради"
+            onClick={() => void copy()}
+          >
+            {copied ? <IconCheck /> : <IconCopy />} {copied ? 'Скопировано' : 'Копировать транскрипцию'}
+          </button>
+        </div>
+      </div>
+      <PhoneticText phonetics={props.phonetics} style={props.style} />
+    </div>
+  )
+}
+
 export function TranslatePage(props: { settings: SettingsPublic; onChanged: () => void }): JSX.Element {
   const [sourceLang, setSourceLang] = useState('auto')
   const [targetLang, setTargetLang] = useState(props.settings.translateTargetLang)
@@ -105,20 +154,65 @@ export function TranslatePage(props: { settings: SettingsPublic; onChanged: () =
   // выглядело как ошибка на ровном месте при работающем интернете
   const runIdRef = useRef(0)
 
+  // транскрипция идёт отдельными запросами и дорисовывается, когда готова:
+  // перевод не должен ждать значков
+  const [phon, setPhon] = useState<PhonState>({ pending: false })
+  const phonStyle = props.settings.phoneticsStyle ?? 'ipa'
+  // язык оригинала угадан по тексту, а не выбран: угадывание различает только
+  // русский и «латиницу», и немецкий текст получил бы английские значки
+  const sourceGuessedRef = useRef(false)
+
   const runTranslate = async (text = sourceText, target = targetLang): Promise<void> => {
     if (!text.trim()) return
     const runId = ++runIdRef.current
+    const fresh = (): boolean => runId === runIdRef.current
     setLoading(true)
     setError(null)
+
+    const wantPhon = props.settings.phonetics
+    // русский текст с переводом на русский транскрибировать нечего — не мигаем «готовлю»
+    setPhon({ pending: wantPhon && (cyrShare(text) <= 0.5 || target !== 'ru') })
+    const applyPhon = (side: 'source' | 'result', shown: string, r: PhoneticsReply): void => {
+      if (!fresh()) return
+      setPhon((p) =>
+        r.ok
+          ? {
+              ...p,
+              [side]: r.phonetics ?? undefined,
+              [side === 'source' ? 'sourceText' : 'resultText']: shown,
+              note: r.note ?? p.note
+            }
+          : { ...p, note: r.message }
+      )
+    }
+    // оригинал от перевода не зависит — его значки спрашиваем сразу, параллельно
+    const sourceDone = wantPhon
+      ? vox
+          .phonetics(text, sourceGuessedRef.current ? 'auto' : sourceLang)
+          .then((r) => applyPhon('source', text, r))
+      : Promise.resolve()
+
     const res = await vox.translateRun(text, target)
-    if (runId !== runIdRef.current) return // нас обогнал более свежий запрос
+    if (!fresh()) return // нас обогнал более свежий запрос
     setLoading(false)
     if (!res.ok) {
       setError(res.message ?? 'Не удалось перевести')
       setResult('')
+      setPhon((p) => ({ ...p, pending: false }))
       return
     }
-    setResult(res.result ?? '')
+    const translated = res.result ?? ''
+    setResult(translated)
+    const resultDone =
+      wantPhon && target !== 'ru'
+        ? vox.phonetics(translated, target).then((r) => applyPhon('result', translated, r))
+        : Promise.resolve()
+    await Promise.all([sourceDone, resultDone])
+    if (fresh()) setPhon((p) => ({ ...p, pending: false }))
+  }
+
+  const pickPhonStyle = (style: PhoneticsStyle): void => {
+    void vox.updateSettings({ phoneticsStyle: style }).then(() => props.onChanged())
   }
 
   // Язык оригинала определяется по тексту: без этого кнопка обмена языками
@@ -129,7 +223,10 @@ export function TranslatePage(props: { settings: SettingsPublic; onChanged: () =
     if (text.length < 12) return
     const share = cyrShare(text)
     const guess = share > 0.6 ? 'ru' : share < 0.2 && /[A-Za-z]/.test(text) ? 'en' : ''
-    if (guess && guess !== targetLang) setSourceLang(guess)
+    if (guess && guess !== targetLang) {
+      sourceGuessedRef.current = true
+      setSourceLang(guess)
+    }
   }, [sourceText])
 
   // Перевод идёт сам: запрос уходит через паузу после последнего нажатия клавиши,
@@ -143,6 +240,8 @@ export function TranslatePage(props: { settings: SettingsPublic; onChanged: () =
       setResult('')
       setError(null)
       setLoading(false)
+      setPhon({ pending: false })
+      sourceGuessedRef.current = false
       return
     }
     autoRef.current = setTimeout(() => void runTranslate(sourceText, targetLang), 650)
@@ -178,6 +277,7 @@ export function TranslatePage(props: { settings: SettingsPublic; onChanged: () =
     if (sourceLang === 'auto') return
     const nextSourceLang = targetLang
     const nextTargetLang = sourceLang
+    sourceGuessedRef.current = false // язык перевода выбирали сами — ему можно верить
     setSourceLang(nextSourceLang)
     setTargetLang(nextTargetLang)
     setSourceText(result)
@@ -235,7 +335,10 @@ export function TranslatePage(props: { settings: SettingsPublic; onChanged: () =
             className="translate-lang-select"
             aria-label="Язык исходного текста"
             value={sourceLang}
-            onChange={(e) => setSourceLang(e.target.value)}
+            onChange={(e) => {
+              sourceGuessedRef.current = false
+              setSourceLang(e.target.value)
+            }}
           >
             {SOURCE_LANGS.map((l) => (
               <option key={l.code} value={l.code}>
@@ -334,6 +437,48 @@ export function TranslatePage(props: { settings: SettingsPublic; onChanged: () =
       </div>
 
       <div className="translate-status">{loading ? 'Перевод…' : ''}</div>
+
+      {props.settings.phonetics && (phon.source || phon.result || phon.pending || phon.note) && (
+        <section className="phon-panel">
+          <div className="phon-panel-head">
+            <h2 className="section-title">Транскрипция</h2>
+            <div className="phon-styles" role="radiogroup" aria-label="Как показывать произношение">
+              {PHONETICS_STYLES.map((st) => (
+                <button
+                  key={st.id}
+                  role="radio"
+                  aria-checked={phonStyle === st.id}
+                  className={`phon-style ${phonStyle === st.id ? 'active' : ''}`}
+                  title={st.example}
+                  onClick={() => pickPhonStyle(st.id)}
+                >
+                  {st.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {phon.source && (
+            <PhonBlock
+              title={`${langBadge(phon.source.lang)} · оригинал`}
+              phonetics={phon.source}
+              text={phon.sourceText ?? sourceText}
+              style={phonStyle}
+            />
+          )}
+          {phon.result && (
+            <PhonBlock
+              title={`${langBadge(phon.result.lang)} · перевод`}
+              phonetics={phon.result}
+              text={phon.resultText ?? result}
+              style={phonStyle}
+            />
+          )}
+          {phon.pending && !phon.source && !phon.result && (
+            <div className="phon-status">Готовлю транскрипцию…</div>
+          )}
+          {phon.note && <div className="phon-status">{phon.note}</div>}
+        </section>
+      )}
 
       <div className="page-head translate-history-head">
         <h2 className="section-title">История переводов</h2>

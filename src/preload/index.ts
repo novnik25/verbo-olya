@@ -58,6 +58,7 @@ const api = {
     ipcRenderer.invoke(IPC.regionPicked, rect),
   translateRun: (text: string, targetLang: string) =>
     ipcRenderer.invoke(IPC.translateRun, { text, targetLang }),
+  phonetics: (text: string, lang?: string) => ipcRenderer.invoke(IPC.phoneticsGet, { text, lang }),
   listTranslations: (search?: string) => ipcRenderer.invoke(IPC.translationsList, search),
   deleteTranslation: (id: string) => ipcRenderer.invoke(IPC.translationsDelete, id),
   clearTranslations: () => ipcRenderer.invoke(IPC.translationsClear),

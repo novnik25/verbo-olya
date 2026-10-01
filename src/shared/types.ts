@@ -27,6 +27,8 @@ export interface Settings {
   translateTargetLang: string // язык панели мгновенного перевода (код из TRANSLATE_LANGS)
   translateRecentLangs: string[] // последние выбранные языки перевода (до 3)
   saveTranslations: boolean // сохранять историю переводов (панель Ctrl+V×2 и вкладка «Переводчик»)
+  phonetics: boolean // показывать транскрипцию иностранного текста везде, где есть перевод
+  phoneticsStyle: import('./phonetics').PhoneticsStyle // значками МФА / русскими буквами / обоими
   settingsRev: number // версия схемы настроек для одноразовых миграций
   showDock: boolean // тонкая полоска-индикатор внизу экрана (клик — выбор языка)
   theme: 'dark' | 'light' // оформление главного окна
@@ -151,6 +153,14 @@ export type OverlayState =
       target: string
       loading: boolean
       error?: string
+      // транскрипция: язык стороны есть, только если она иностранная и транскрипция включена
+      sourceLang?: string
+      resultLang?: string
+      sourcePhonetics?: import('./phonetics').Phonetics
+      resultPhonetics?: import('./phonetics').Phonetics
+      phoneticsStyle?: import('./phonetics').PhoneticsStyle
+      phoneticsPending?: boolean // запросы транскрипции ещё не вернулись
+      phoneticsNote?: string // транскрипция не загрузилась или загрузилась не вся
     }
   | {
       // панель озвучивания выделенного текста (Ctrl+C ×2) или перевода («Слушать»)
@@ -210,6 +220,7 @@ export const IPC = {
   ocrRegion: 'ocr:region',                 // overlay → main, выбрать область экрана и перевести
   regionPicked: 'region:picked',           // окно выбора → main, {x,y,width,height} | null                   // renderer → main, ArrayBuffer с картинкой → распознанный текст
   translateRun: 'translate:run',           // renderer → main, {text, targetLang} — перевод из вкладки «Переводчик»
+  phoneticsGet: 'phonetics:get',           // renderer → main, {text, lang} — транскрипция иностранного текста
   translationsList: 'translations:list',       // renderer → main, (search?) — список истории переводов
   translationsDelete: 'translations:delete',   // renderer → main, (id)
   translationsClear: 'translations:clear',     // renderer → main

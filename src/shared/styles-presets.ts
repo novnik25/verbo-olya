@@ -202,9 +202,13 @@ export const DEFAULT_SETTINGS: Settings = {
   translateTargetLang: 'ru',
   translateRecentLangs: [],
   saveTranslations: true,
+  phonetics: true,
+  phoneticsStyle: 'ipa',
   keepAudioDays: 7,
   sttModel: 'whisper-large-v3-turbo',
-  llmModel: 'llama-3.3-70b-versatile',
+  // llama-3.3-70b сервис вывел из оборота: на ней первая же попытка перевода
+  // падала и лишь потом заменялась — у новой установки этого быть не должно
+  llmModel: 'openai/gpt-oss-120b',
   onboardingDone: false,
   settingsRev: 4,
   showDock: true,

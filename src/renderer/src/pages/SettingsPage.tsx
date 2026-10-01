@@ -5,6 +5,8 @@ import { MIN_PASSPHRASE } from '../../../shared/types'
 import { SPEED_STEPS, snapRate } from '../../../shared/speech-rate'
 import { RU_VOICES, EN_VOICES } from '../../../shared/voices'
 import { TRANSLATE_LANGS } from '../../../shared/lang'
+import { PHONETICS_STYLES } from '../../../shared/phonetics'
+import type { PhoneticsStyle } from '../../../shared/phonetics'
 import { vox } from '../api'
 import { HotkeyCapture } from '../components/HotkeyCapture'
 
@@ -365,6 +367,39 @@ export function SettingsPage(props: {
               />
               Сохранять историю переводов на вкладке «Переводчик»
             </label>
+          </Block>
+
+          <Block
+            title="Транскрипция"
+            note="Под каждым иностранным словом показывается, как оно произносится: в панели перевода, при переводе области экрана и на вкладке «Переводчик». Русский текст не транскрибируется."
+          >
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={s.phonetics}
+                onChange={(e) => patch({ phonetics: e.target.checked })}
+              />
+              Показывать транскрипцию
+            </label>
+            <div className="field">
+              <label>Как записывать произношение</label>
+              <div className="desc">
+                Значки — международная транскрипция, как в школьных словарях. Русские буквы
+                подсказывают чтение, пока значки непривычны. Для китайского и японского
+                всегда показывается латиница: пиньинь и ромадзи.
+              </div>
+              <select
+                value={s.phoneticsStyle}
+                disabled={!s.phonetics}
+                onChange={(e) => patch({ phoneticsStyle: e.target.value as PhoneticsStyle })}
+              >
+                {PHONETICS_STYLES.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {st.label} — {st.example}
+                  </option>
+                ))}
+              </select>
+            </div>
           </Block>
         </>
       )}

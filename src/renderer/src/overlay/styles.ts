@@ -236,11 +236,37 @@ ${rootVars(GLASS)}
     font-size: 12px; line-height: 1.5; margin: 2px 0 10px;
     max-height: 88px; overflow: hidden; word-break: break-word; white-space: pre-wrap;
   }
+  /* выше, чем в основном Verbo: под словами стоит транскрипция, и текст
+     с ней вдвое выше — в 180px умещалась бы пара строк */
   .card-body {
     font-size: 13px; line-height: 1.55; margin-bottom: 10px;
-    max-height: 180px; overflow-y: auto; word-break: break-word; white-space: pre-wrap;
+    max-height: 270px; overflow-y: auto; word-break: break-word; white-space: pre-wrap;
   }
   .skeleton { color: var(--dim); }
+
+  /* ── транскрипция: произношение под каждым словом ─────────────────────────── */
+  .phon-source {
+    margin-bottom: 9px; padding-bottom: 9px; border-bottom: 1px solid var(--line-soft);
+  }
+  .phon-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    min-height: 20px; margin-bottom: 3px;
+    font-size: 10.5px; color: var(--dim); white-space: normal;
+  }
+  .phon-head .icon-btn { width: 22px; height: 22px; }
+  .phon-text { line-height: 1.3; white-space: pre-wrap; }
+  /* слово и его произношение — столбиком; базовая линия у слова, поэтому
+     запятые и точки между словами встают ровно по тексту */
+  .phon-word {
+    display: inline-flex; flex-direction: column; align-items: center;
+    margin-bottom: 7px;
+  }
+  .phon-ipa {
+    font-size: 11.5px; line-height: 1.3; color: var(--accent); white-space: nowrap;
+  }
+  .phon-ru { font-size: 11px; line-height: 1.3; color: var(--dim); white-space: nowrap; }
+  .phon-stress { color: var(--ink); font-weight: 700; }
+  .phon-wait { margin-top: 6px; font-size: 11px; color: var(--dim); white-space: normal; }
   /* прокрутка внутри панелей — в цвет панели, а не системная белая */
   .card-body::-webkit-scrollbar, .menu::-webkit-scrollbar { width: 9px; }
   .card-body::-webkit-scrollbar-track, .menu::-webkit-scrollbar-track { background: transparent; }

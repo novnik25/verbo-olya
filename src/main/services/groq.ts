@@ -17,7 +17,7 @@ function classify(status: number): ApiFail['kind'] {
   return 'permanent'
 }
 
-async function failFrom(res: { status: number; text?: () => Promise<string> }): Promise<ApiFail> {
+export async function failFrom(res: { status: number; text?: () => Promise<string> }): Promise<ApiFail> {
   let detail = ''
   try {
     detail = res.text ? (await res.text()).slice(0, 200) : ''
@@ -41,7 +41,7 @@ async function failFrom(res: { status: number; text?: () => Promise<string> }): 
   }
 }
 
-const NET_FAIL: ApiFail = { ok: false, kind: 'transient', message: 'Нет соединения с интернетом' }
+export const NET_FAIL: ApiFail = { ok: false, kind: 'transient', message: 'Нет соединения с интернетом' }
 
 export async function transcribe(opts: {
   apiKey: string

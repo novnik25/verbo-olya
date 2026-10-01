@@ -34,6 +34,9 @@ import { setupTray } from './tray'
 import { registerIpc } from './ipc'
 import { initLog, log } from './core/logger'
 import { makeKeyCrypto } from './core/key-crypto'
+import { PhoneticsMemory, foreignLang } from './core/phonetics'
+import { PhoneticsService } from './services/phonetics'
+import type { PhoneticsReply } from '../shared/phonetics'
 
 // Замок берётся по папке, производной от name в package.json, — ДО setPath ниже.
 // Поэтому у версии для Оли там своё имя (verbo-olya): с прежним «verbo» она молча
@@ -97,6 +100,25 @@ if (settings.getPublic().keyUnprotected) {
 }
 const history = new HistoryService(join(dataDir, 'history.json'))
 const translations = new TranslationStore(join(dataDir, 'translations.json'))
+
+// транскрипция иностранного текста; узнанные слова запоминаются, чтобы не спрашивать снова
+const phoneticsService = new PhoneticsService({
+  memory: new PhoneticsMemory(join(dataDir, 'phonetics.json')),
+  getApiKey: () => settings.getApiKey(),
+  fallbackModel: () => settings.get().llmModel,
+  log
+})
+const phonetics = {
+  /** Без исключений: сбой записи памяти на диск не должен ронять панель перевода. */
+  async forText(text: string, lang?: string): Promise<PhoneticsReply> {
+    try {
+      return await phoneticsService.forText(text, lang)
+    } catch (err) {
+      log(`транскрипция: СБОЙ — ${err instanceof Error ? err.message : String(err)}`)
+      return { ok: false, message: 'Не удалось получить транскрипцию' }
+    }
+  }
+}
 // счётчики использования переводчика и озвучивания (только числа, без текстов)
 const usage = new UsageStore(join(dataDir, 'usage.json'))
 
@@ -388,11 +410,18 @@ const pasteAttempts: Array<(text: string) => Promise<import('./services/inserter
 
 // панель мгновенного перевода выделенного текста (Ctrl+V ×2): текущая сессия — выделение
 // и последний перевод, нужны IPC-обработчикам смены языка/замены/закрытия
+type TranslateView = Extract<OverlayState, { phase: 'translate' }>
 interface TranslateSession {
   source: string
   result: string
+  /** Транскрипция оригинала от языка перевода не зависит: при смене языка её не спрашиваем снова. */
+  sourcePhonetics?: Promise<PhoneticsReply>
+  /** Последнее показанное состояние панели — к нему возвращаемся после чтения вслух. */
+  view?: TranslateView
 }
 let translateSession: TranslateSession | null = null
+/** Номер последнего запуска перевода: ответы опоздавших запусков панель не трогают. */
+let translateRunSeq = 0
 
 /** Двойное нажатие translateHotkey: захватить выделение в чужом окне и перевести его. */
 async function handleTranslateTap(): Promise<void> {
@@ -457,23 +486,79 @@ async function translateSafely(
   return { ok: true, text: res.text }
 }
 
-/** Переводит текущее выделение сессии на target и обновляет панель. */
+/**
+ * Переводит текущее выделение сессии на target и обновляет панель.
+ *
+ * Транскрипция оригинала запрашивается ВМЕСТЕ с переводом, а не после него:
+ * она от перевода не зависит, и иначе значки появлялись бы на секунду позже.
+ * Транскрипция перевода — только когда он готов. Каждый ответ дорисовывает
+ * панель сам, не дожидаясь остальных.
+ */
 async function runTranslate(target: string): Promise<void> {
-  if (!translateSession) return
-  const { source } = translateSession
-  overlaySend({ phase: 'translate', source, result: translateSession.result, target, loading: true })
+  const session = translateSession
+  if (!session) return
+  const run = ++translateRunSeq
+  const { source } = session
+  const s = settings.get()
+  const sourceLang = s.phonetics ? foreignLang(source) ?? undefined : undefined
+  const resultLang = s.phonetics && target !== 'ru' ? target : undefined
+  // панель могли закрыть или перезапустить с другим языком, пока шли запросы
+  const live = (): boolean => translateSession === session && translateRunSeq === run
+  let view: TranslateView = {
+    phase: 'translate',
+    source,
+    result: session.result,
+    target,
+    loading: true,
+    sourceLang,
+    resultLang,
+    phoneticsStyle: s.phoneticsStyle,
+    phoneticsPending: Boolean(sourceLang || resultLang)
+  }
+  const startedAt = Date.now()
+  const show = (patch: Partial<TranslateView>): void => {
+    if (!live()) return
+    view = { ...view, ...patch }
+    session.view = view
+    // Оригинал можно слушать, пока перевод и значки ещё в пути. Чтение, начатое
+    // ИЗ ЭТОЙ панели, пришедший ответ закрывать не должен — вместе с ним исчезли
+    // бы «Пауза» и «Стоп»; панель перевода вернётся сама (overlayAfterSpeech).
+    // Чтение, начатое раньше перевода, — другое дело: новую просьбу о переводе
+    // показываем сразу, как и прежде.
+    const speakingFromPanel = speakSession !== null && speakSession.startedAt >= startedAt
+    if (!speakingFromPanel) overlaySend(view)
+  }
+  const showPhonetics = (side: 'sourcePhonetics' | 'resultPhonetics', r: PhoneticsReply): void => {
+    if (!r.ok) show({ phoneticsNote: r.message })
+    else show({ [side]: r.phonetics ?? undefined, ...(r.note ? { phoneticsNote: r.note } : {}) })
+  }
+  show({})
+
+  if (sourceLang && !session.sourcePhonetics) {
+    session.sourcePhonetics = phonetics.forText(source, sourceLang)
+  }
+  const sourceDone = sourceLang
+    ? session.sourcePhonetics!.then((r) => showPhonetics('sourcePhonetics', r))
+    : Promise.resolve()
+
   const res = await translateSafely(source, target)
-  if (!translateSession) return // панель могли закрыть, пока шёл запрос
+  if (!live()) return
   if (!res.ok) {
-    overlaySend({ phase: 'translate', source, result: '', target, loading: false, error: res.message })
+    show({ result: '', loading: false, error: res.message, phoneticsPending: false })
     return
   }
-  translateSession.result = res.text
+  session.result = res.text
   usage.record('translate', { key: target, chars: source.length })
-  if (settings.get().saveTranslations) {
+  if (s.saveTranslations) {
     translations.add({ source, result: res.text, targetLang: target, via: 'popup' })
   }
-  overlaySend({ phase: 'translate', source, result: res.text, target, loading: false })
+  show({ result: res.text, loading: false, error: undefined })
+
+  const resultDone = resultLang
+    ? phonetics.forText(res.text, resultLang).then((r) => showPhonetics('resultPhonetics', r))
+    : Promise.resolve()
+  await Promise.all([sourceDone, resultDone])
+  show({ phoneticsPending: false })
 }
 
 /** Перевод из вкладки «Переводчик» в главном окне: пишет в историю переводов сам, без сессии оверлея. */
@@ -620,6 +705,7 @@ interface SpeakSession {
   rate: number // темп, с которым читается текущий фрагмент — чтобы заметить смену на ходу
   paused: boolean
   restart: boolean // сменили голос или темп: текущий фрагмент читаем заново
+  startedAt: number // когда начали: панель перевода отличает «слушают из меня» от чтения до неё
 }
 
 /** Состояние панели чтения по текущей сессии. */
@@ -644,6 +730,15 @@ function overlayIdle(): void {
   const speaking = speakingState()
   overlaySend(speaking ?? { phase: 'idle', lang: settings.get().outputLang })
 }
+
+/**
+ * Чтение закончилось. Если его запустили из открытой панели перевода, панель
+ * возвращается: прослушать слово и снова смотреть на его транскрипцию — главный
+ * сценарий этой сборки, а прежде панель исчезала вместе с чтением.
+ */
+function overlayAfterSpeech(): void {
+  overlaySend(translateSession?.view ?? { phase: 'idle', lang: settings.get().outputLang })
+}
 let speakSession: SpeakSession | null = null
 
 /** Синтезирует и воспроизводит текст; ведёт панель оверлея 'speaking'. */
@@ -659,7 +754,8 @@ async function speakText(text: string, voiceId?: string): Promise<{ ok: boolean;
     lang,
     rate: s.speakRate,
     paused: false,
-    restart: false
+    restart: false,
+    startedAt: Date.now()
   }
   overlaySend(speakingState()!)
   const startedAt = Date.now()
@@ -715,7 +811,7 @@ async function speakText(text: string, voiceId?: string): Promise<{ ok: boolean;
   }
   if (speakSession) {
     speakSession = null
-    overlaySend({ phase: 'idle', lang: settings.get().outputLang })
+    overlayAfterSpeech()
   }
   return { ok: true }
 }
@@ -728,7 +824,7 @@ function speakControl(action: 'pause' | 'resume' | 'stop', why = 'кнопка')
     log(`озвучка: остановлена (${why})`)
     controlPlayback('stop')
     speakSession = null
-    overlaySend({ phase: 'idle', lang: settings.get().outputLang })
+    overlayAfterSpeech()
     return
   }
   speakSession.paused = action === 'pause'
@@ -1009,6 +1105,7 @@ void app.whenReady().then(() => {
     translateReplace,
     translateClose,
     translateRun,
+    phonetics: (text, lang) => phonetics.forText(text, lang),
     ocrImage: runOcr,
     regionPicked,
     translations,
