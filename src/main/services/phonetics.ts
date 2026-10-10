@@ -12,6 +12,7 @@ import {
   wordKey
 } from '../core/phonetics'
 import { NET_FAIL, failFrom } from './groq'
+import { serviceFetch } from './http'
 import type { ApiFail } from './groq'
 
 /**
@@ -101,7 +102,7 @@ export async function requestPronunciations(opts: {
   words: string[]
   fetchFn?: typeof fetch
 }): Promise<{ ok: true; found: Record<string, string> } | ApiFail> {
-  const f = opts.fetchFn ?? fetch
+  const f = opts.fetchFn ?? serviceFetch
   try {
     const res = await f(`${GROQ_BASE}/chat/completions`, {
       method: 'POST',
@@ -248,7 +249,7 @@ export class PhoneticsService {
   }
 
   private async listModels(apiKey: string): Promise<string[] | null> {
-    const f = this.deps.fetchFn ?? fetch
+    const f = this.deps.fetchFn ?? serviceFetch
     try {
       const res = await f(`${GROQ_BASE}/models`, { headers: { Authorization: `Bearer ${apiKey}` } })
       if (!res.ok) return null

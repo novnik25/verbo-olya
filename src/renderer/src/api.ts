@@ -5,7 +5,8 @@ import type {
   HotkeyCombo,
   TranslationEntry,
   KeyExportResult,
-  KeyImportResult
+  KeyImportResult,
+  KeyCheck
 } from '../../shared/types'
 import type { PhoneticsReply } from '../../shared/phonetics'
 
@@ -13,7 +14,7 @@ export interface VoxApi {
   getSettings(): Promise<SettingsPublic>
   updateSettings(patch: Partial<SettingsPublic>): Promise<SettingsPublic>
   setApiKey(key: string): Promise<void>
-  verifyApiKey(key?: string): Promise<'ok' | 'invalid' | 'malformed' | 'blocked' | 'unreachable'>
+  verifyApiKey(key?: string): Promise<KeyCheck>
   captureHotkey(): Promise<HotkeyCombo | null>
   listHistory(search?: string): Promise<HistoryEntry[]>
   deleteHistory(id: string): Promise<void>

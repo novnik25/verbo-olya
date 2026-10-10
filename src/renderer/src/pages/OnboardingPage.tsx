@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { APP_NAME } from '../../../shared/app'
 import { vox } from '../api'
 import { WaveMark } from '../App'
+import { KeyAccessError } from '../components/KeyAccessError'
 
 export function OnboardingPage(props: { onDone: () => void }): JSX.Element {
   const [key, setKey] = useState('')
@@ -11,11 +12,13 @@ export function OnboardingPage(props: { onDone: () => void }): JSX.Element {
     | 'bad'
     | 'malformed'
     | 'blocked'
+    | 'forbidden'
     | 'offline'
     | 'damaged'
     | 'wrong-passphrase'
     | 'rejected'
     | 'unreachable'
+    | 'save-failed'
   >('idle')
   // фраза, которой закрыт файл ключа на том компьютере, откуда его принесли
   const [passphrase, setPassphrase] = useState('')
@@ -42,8 +45,8 @@ export function OnboardingPage(props: { onDone: () => void }): JSX.Element {
             ? 'offline'
             : res === 'malformed'
               ? 'malformed'
-              : res === 'blocked'
-                ? 'blocked'
+              : res === 'blocked' || res === 'forbidden'
+                ? res
                 : 'bad'
         )
         return
@@ -52,7 +55,7 @@ export function OnboardingPage(props: { onDone: () => void }): JSX.Element {
       await vox.updateSettings({ onboardingDone: true })
       props.onDone()
     } catch {
-      setStatus('bad')
+      setStatus('save-failed')
     }
   }
 
@@ -87,6 +90,7 @@ export function OnboardingPage(props: { onDone: () => void }): JSX.Element {
           type="password"
           placeholder="gsk_…"
           value={key}
+          disabled={status === 'checking'}
           onChange={(e) => { setKey(e.target.value); setStatus('idle') }}
           onKeyDown={(e) => e.key === 'Enter' && key && status !== 'checking' && void submit()}
         />
@@ -103,11 +107,9 @@ export function OnboardingPage(props: { onDone: () => void }): JSX.Element {
           слова Bearer.
         </p>
       )}
-      {status === 'blocked' && (
-        <p className="err">
-          Сервис не обслуживает страну, из которой пришёл запрос. Включите VPN для всей системы, а
-          не только в браузере: {APP_NAME} ходит в сеть отдельно от него.
-        </p>
+      {(status === 'blocked' || status === 'forbidden') && <KeyAccessError reason={status} />}
+      {status === 'save-failed' && (
+        <p className="err">Не удалось проверить или сохранить ключ. Повторите попытку.</p>
       )}
       {status === 'offline' && (
         <p className="err">

@@ -63,7 +63,9 @@ export function registerIpc(deps: {
     deps.settings.setApiKey(cleanApiKey(key))
   })
   ipcMain.handle(IPC.settingsVerifyKey, async (_e, key?: string) => {
-    const итог = await checkKey(cleanApiKey(key ?? '') || deps.settings.getApiKey() || '', undefined, log)
+    // Пустое введённое значение нельзя проверять старым ключом: иначе проверка
+    // пройдёт, а следом окно сохранит пустой ключ поверх рабочего.
+    const итог = await checkKey(key === undefined ? deps.settings.getApiKey() || '' : key, undefined, log)
     log(`ключ: проверка — ${итог}`)
     return итог
   })
@@ -192,9 +194,9 @@ export function registerIpc(deps: {
     // негодный ключ РАЗНЫЕ вещи: раньше оба сводились к «не принят»
     const проверка = await checkKey(opened.key, undefined, log)
     log(`ключ из файла: проверка — ${проверка}`)
-    if (проверка === 'unreachable' || проверка === 'blocked') return 'unreachable'
+    if (проверка === 'unreachable' || проверка === 'blocked' || проверка === 'forbidden') return проверка
     if (проверка !== 'ok') return 'rejected'
-    deps.settings.setApiKey(opened.key)
+    deps.settings.setApiKey(cleanApiKey(opened.key))
     return 'ok'
   })
 }
