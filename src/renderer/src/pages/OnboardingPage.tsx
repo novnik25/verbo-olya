@@ -3,6 +3,7 @@ import { APP_NAME } from '../../../shared/app'
 import { vox } from '../api'
 import { WaveMark } from '../App'
 import { KeyAccessError } from '../components/KeyAccessError'
+import { UsageGuideButton } from '../components/UsageGuide'
 
 export function OnboardingPage(props: { onDone: () => void }): JSX.Element {
   const [key, setKey] = useState('')
@@ -71,6 +72,7 @@ export function OnboardingPage(props: { onDone: () => void }): JSX.Element {
         распознанный текст появится в активном поле ввода. Для работы нужен бесплатный ключ доступа:
         платёжные данные не запрашиваются.
       </p>
+      <UsageGuideButton />
       <ol>
         <li>
           Откройте{' '}
