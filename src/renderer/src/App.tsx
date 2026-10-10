@@ -35,6 +35,7 @@ import { StatsPage } from './pages/StatsPage'
 import { StylesPage } from './pages/StylesPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { OnboardingPage } from './pages/OnboardingPage'
+import { UsageGuideButton } from './components/UsageGuide'
 
 const TABS = [
   { id: 'history', label: 'История' },
@@ -111,6 +112,7 @@ export function App(): JSX.Element {
           ))}{' '}
           в любом приложении и говорите
         </div>
+        <UsageGuideButton compact />
         <button
           className="theme-toggle"
           title={settings.theme === 'dark' ? 'Светлое оформление' : 'Тёмное оформление'}

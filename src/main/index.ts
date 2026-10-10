@@ -34,6 +34,7 @@ import { setupTray } from './tray'
 import { registerIpc } from './ipc'
 import { initLog, log } from './core/logger'
 import { makeKeyCrypto } from './core/key-crypto'
+import { configureServiceFetch, serviceFetch } from './services/http'
 import { PhoneticsMemory, foreignLang } from './core/phonetics'
 import { PhoneticsService } from './services/phonetics'
 import type { PhoneticsReply } from '../shared/phonetics'
@@ -46,9 +47,8 @@ if (!app.requestSingleInstanceLock()) {
   app.exit(0)
 }
 
-// окна грузят только локальные страницы — системный прокси (VPN/антивирус)
-// не должен перехватывать loopback-запросы к dev-серверу
-app.commandLine.appendSwitch('no-proxy-server')
+// Chromium сам обходит прокси для loopback. Отключать прокси всему приложению
+// нельзя: VPN может работать именно через системные настройки Windows.
 
 // сбой внутри сторонней библиотеки (например синтеза речи) не должен ронять
 // приложение диалогом Electron: пишем в журнал и продолжаем работу
@@ -144,7 +144,7 @@ async function probeServer(): Promise<void> {
     const ctl = new AbortController()
     const timer = setTimeout(() => ctl.abort(), 4000)
     // без ключа ответ будет 401 — но это значит, что сервер ДОСТИЖИМ
-    await fetch(`${GROQ_BASE}/models`, { method: 'HEAD', signal: ctl.signal })
+    await serviceFetch(`${GROQ_BASE}/models`, { method: 'HEAD', signal: ctl.signal })
     clearTimeout(timer)
     pushServerReachable(true)
   } catch {
@@ -1035,6 +1035,7 @@ app.on('window-all-closed', () => {
 })
 
 void app.whenReady().then(() => {
+  configureServiceFetch((input, init) => net.fetch(input instanceof URL ? input.href : input, init))
   setupPermissions()
   recorderWindow = createRecorderWindow()
   overlayWindow = createOverlayWindow()

@@ -1,6 +1,6 @@
 {
   "name": "verbo-olya",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Verbo для Оли — перевод с транскрипцией, голосовой ввод и чтение вслух для Windows",
   "main": "out/main/index.js",
   "author": "Никита",

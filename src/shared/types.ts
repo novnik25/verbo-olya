@@ -177,6 +177,8 @@ export const MIN_PASSPHRASE = 8
 
 /** Чем закончилось сохранение ключа в файл — окно объясняет причину словами. */
 export type KeyExportResult = 'ok' | 'no-key' | 'cancelled' | 'weak-passphrase'
+/** Запрет доступа отличается от неверного ключа: менять ключ бесполезно. */
+export type KeyCheck = 'ok' | 'invalid' | 'malformed' | 'blocked' | 'forbidden' | 'unreachable'
 /**
  * Чем закончилось чтение файла ключа. 'rejected' — сервис ключ не принял,
  * 'unreachable' — до сервиса не достучались: ключ при этом может быть годным,
@@ -189,6 +191,8 @@ export type KeyImportResult =
   | 'wrong-passphrase'
   | 'rejected'
   | 'unreachable'
+  | 'blocked'
+  | 'forbidden'
 
 export const IPC = {
   settingsGet: 'settings:get',

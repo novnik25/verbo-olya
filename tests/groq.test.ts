@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   checkKey,
   pickBestLlmModel,
@@ -9,6 +9,7 @@ import {
   applyStyle
 } from '../src/main/services/groq'
 import { wrapForeignText } from '../src/shared/lang'
+import { configureServiceFetch } from '../src/main/services/http'
 
 const okFetch = (body: unknown) =>
   (async () => ({ ok: true, status: 200, json: async () => body })) as unknown as typeof fetch
@@ -98,8 +99,29 @@ describe('checkKey', () => {
     expect(await checkKey('k', страна)).toBe('blocked')
   })
 
-  it('403 без упоминания страны -> всё-таки про ключ', async () => {
-    expect(await checkKey('k', errFetch(403))).toBe('invalid')
+  it('403 без упоминания страны -> запрет доступа, а не неверный ключ', async () => {
+    expect(await checkKey('k', errFetch(403))).toBe('forbidden')
+  })
+
+  it('ключ не попадает в журнал, даже если сервер вернул его в ответе', async () => {
+    const log = vi.fn()
+    const response = (async () => new Response('Invalid key gsk_TEST_SECRET', { status: 401 })) as typeof fetch
+    expect(await checkKey('gsk_TEST_SECRET', response, log)).toBe('invalid')
+    expect(log.mock.calls.flat().join(' ')).not.toContain('gsk_TEST_SECRET')
+  })
+
+  it('зависшее подключение прерывается и не объявляет ключ неверным', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(AbortSignal.abort())
+    const stalled = (async (_url, init) => {
+      init?.signal?.throwIfAborted()
+      throw new Error('не должно дойти')
+    }) as typeof fetch
+    try {
+      expect(await checkKey('gsk_TEST', stalled)).toBe('unreachable')
+      expect(timeout).toHaveBeenCalledWith(12_000)
+    } finally {
+      timeout.mockRestore()
+    }
   })
 
   it('503 -> сервис недоступен, а не «плохой ключ»', async () => {
@@ -140,6 +162,27 @@ describe('checkKey', () => {
     }) as unknown as typeof fetch
     expect(await checkKey('  "Bearer gsk_ABC123"  ', шпион)).toBe('ok')
     expect(ушло).toBe('Bearer gsk_ABC123')
+  })
+})
+
+describe('общий транспорт сервиса', () => {
+  afterEach(() => configureServiceFetch((...args) => fetch(...args)))
+
+  it('проверка ключа и дальнейшая работа используют одно подключение', async () => {
+    const transport = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/models')) {
+        return new Response(JSON.stringify({ data: [{ id: 'llama-3.3-70b-versatile' }] }))
+      }
+      if (String(input).endsWith('/audio/transcriptions')) {
+        return new Response(JSON.stringify({ text: 'привет' }))
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'готово' } }] }))
+    })
+    configureServiceFetch(transport)
+    expect(await checkKey('gsk_TEST')).toBe('ok')
+    expect(await transcribe({ apiKey: 'gsk_TEST', audio, model: 'm' })).toEqual({ ok: true, text: 'привет' })
+    expect(await applyStyle({ apiKey: 'gsk_TEST', model: 'm', text: 'т', systemPrompt: 'п' })).toEqual({ ok: true, text: 'готово' })
+    expect(transport).toHaveBeenCalledTimes(3)
   })
 })
 

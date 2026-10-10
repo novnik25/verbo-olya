@@ -1,6 +1,8 @@
 import { GROQ_BASE } from '../../shared/types'
 import { stripMarkers, stripMarkersKeepLines, wrapForeignText } from '../../shared/lang'
 import { inspectApiKey } from '../core/api-key'
+import { serviceFetch } from './http'
+import type { KeyCheck } from '../../shared/types'
 
 export type ApiFail = {
   ok: false
@@ -51,7 +53,7 @@ export async function transcribe(opts: {
   prompt?: string
   fetchFn?: typeof fetch
 }): Promise<TextResult> {
-  const f = opts.fetchFn ?? fetch
+  const f = opts.fetchFn ?? serviceFetch
   const form = new FormData()
   form.append('file', new Blob([new Uint8Array(opts.audio)]), 'audio.webm')
   form.append('model', opts.model)
@@ -82,7 +84,7 @@ export async function applyStyle(opts: {
   /** Сохранять переводы строк в ответе: нужно переводу, диктовке — нет. */
   keepLines?: boolean
 }): Promise<TextResult> {
-  const f = opts.fetchFn ?? fetch
+  const f = opts.fetchFn ?? serviceFetch
   try {
     const res = await f(`${GROQ_BASE}/chat/completions`, {
       method: 'POST',
@@ -116,7 +118,7 @@ export async function applyStyle(opts: {
  * не достучались» требуют от человека РАЗНЫХ действий, а раньше все четыре
  * показывались одной фразой «ключ не принят сервисом».
  */
-export type KeyCheck = 'ok' | 'invalid' | 'malformed' | 'blocked' | 'unreachable'
+export type { KeyCheck } from '../../shared/types'
 
 /** Ответы про запрет по стране: у Groq и у прокси формулировки разные. */
 const ПО_СТРАНЕ =
@@ -135,9 +137,12 @@ export async function checkKey(
     log?.('ключ: в значении посторонние знаки — запрос не отправлялся')
     return 'malformed'
   }
-  const f = fetchFn ?? fetch
+  const f = fetchFn ?? serviceFetch
   try {
-    const res = await f(`${GROQ_BASE}/models`, { headers: { Authorization: `Bearer ${key}` } })
+    const res = await f(`${GROQ_BASE}/models`, {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(12_000)
+    })
     if (res.ok) {
       // ответ 200 ещё не значит «сервис»: прокси и страницы входа в публичный
       // Wi-Fi тоже отвечают 200, только html'ем. Такой ответ принимать нельзя —
@@ -156,7 +161,7 @@ export async function checkKey(
     }
     let detail = ''
     try {
-      detail = res.text ? (await res.text()).slice(0, 300) : ''
+      detail = res.text ? (await res.text()).split(key).join('[ключ скрыт]').slice(0, 300) : ''
     } catch {
       /* тело недоступно — хватит и кода */
     }
@@ -165,11 +170,12 @@ export async function checkKey(
     // пришёл запрос, или ограничения аккаунта. Сваливать их в «ключ не принят»
     // значит отправить человека менять исправный ключ
     if (res.status === 401) return 'invalid'
-    if (res.status === 403) return ПО_СТРАНЕ.test(detail) ? 'blocked' : 'invalid'
+    if (res.status === 403) return ПО_СТРАНЕ.test(detail) ? 'blocked' : 'forbidden'
     return 'unreachable'
   } catch (err) {
     // сети нет, DNS не резолвится, соединение отклонено — сервис недостижим
-    log?.(`ключ: до сервиса не достучались — ${err instanceof Error ? err.message : 'сбой сети'}`)
+    const detail = err instanceof Error ? err.message : 'сбой сети'
+    log?.(`ключ: до сервиса не достучались — ${detail.split(key).join('[ключ скрыт]')}`)
     return 'unreachable'
   }
 }
@@ -237,7 +243,7 @@ export async function findVisionModel(
   apiKey: string,
   fetchFn?: typeof fetch
 ): Promise<string | null> {
-  const f = fetchFn ?? fetch
+  const f = fetchFn ?? serviceFetch
   try {
     const res = await f(`${GROQ_BASE}/models`, { headers: { Authorization: `Bearer ${apiKey}` } })
     if (!res.ok) return null
@@ -275,7 +281,7 @@ export async function recognizeWithVision(opts: {
   mime?: string
   fetchFn?: typeof fetch
 }): Promise<TextResult> {
-  const f = opts.fetchFn ?? fetch
+  const f = opts.fetchFn ?? serviceFetch
   const dataUrl = `data:${opts.mime ?? 'image/png'};base64,${opts.image.toString('base64')}`
   try {
     const res = await f(`${GROQ_BASE}/chat/completions`, {
@@ -319,7 +325,7 @@ export async function findWorkingLlmModel(
   apiKey: string,
   fetchFn?: typeof fetch
 ): Promise<string | null> {
-  const f = fetchFn ?? fetch
+  const f = fetchFn ?? serviceFetch
   try {
     const res = await f(`${GROQ_BASE}/models`, { headers: { Authorization: `Bearer ${apiKey}` } })
     if (!res.ok) return null

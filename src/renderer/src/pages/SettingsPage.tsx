@@ -9,6 +9,7 @@ import { PHONETICS_STYLES } from '../../../shared/phonetics'
 import type { PhoneticsStyle } from '../../../shared/phonetics'
 import { vox } from '../api'
 import { HotkeyCapture } from '../components/HotkeyCapture'
+import { KeyAccessError } from '../components/KeyAccessError'
 
 const GROUPS = [
   { id: 'input', label: 'Диктовка' },
@@ -42,7 +43,7 @@ export function SettingsPage(props: {
   const [speakers, setSpeakers] = useState<Array<{ id: string; label: string }>>([])
   const [key, setKey] = useState('')
   const [keyStatus, setKeyStatus] = useState<
-    'idle' | 'checking' | 'ok' | 'bad' | 'malformed' | 'blocked' | 'offline'
+    'idle' | 'checking' | 'ok' | 'bad' | 'malformed' | 'blocked' | 'forbidden' | 'offline' | 'save-failed'
   >('idle')
   // фраза для файла переноса: живёт только в поле, никуда не сохраняется
   const [passphrase, setPassphrase] = useState('')
@@ -146,12 +147,12 @@ export function SettingsPage(props: {
             ? 'offline'
             : res === 'malformed'
               ? 'malformed'
-              : res === 'blocked'
-                ? 'blocked'
+              : res === 'blocked' || res === 'forbidden'
+                ? res
                 : 'bad'
       )
     } catch {
-      setKeyStatus('bad')
+      setKeyStatus('save-failed')
     }
   }
 
@@ -565,6 +566,7 @@ export function SettingsPage(props: {
                 <input
                   type="password"
                   placeholder="gsk_…"
+                  disabled={keyStatus === 'checking'}
                   value={key}
                   onChange={(e) => {
                     setKey(e.target.value)
@@ -588,11 +590,9 @@ export function SettingsPage(props: {
                   пробелов по краям
                 </div>
               )}
-              {keyStatus === 'blocked' && (
-                <div className="err">
-                  Сервис не обслуживает страну, из которой пришёл запрос. Включите VPN для всей
-                  системы, а не только в браузере: {APP_NAME} ходит в сеть отдельно от него.
-                </div>
+              {(keyStatus === 'blocked' || keyStatus === 'forbidden') && <KeyAccessError reason={keyStatus} />}
+              {keyStatus === 'save-failed' && (
+                <div className="err">Не удалось проверить или сохранить ключ. Повторите попытку.</div>
               )}
               {keyStatus === 'offline' && (
                 <div className="err">
@@ -670,6 +670,7 @@ export function SettingsPage(props: {
               {transfer === 'no-key' && (
                 <div className="err">Сначала сохраните ключ выше — переносить нечего</div>
               )}
+              {(transfer === 'blocked' || transfer === 'forbidden') && <KeyAccessError reason={transfer} />}
             </div>
           </Block>
 
