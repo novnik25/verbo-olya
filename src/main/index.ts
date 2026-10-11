@@ -1,4 +1,4 @@
-import { app, Notification, clipboard, desktopCapturer, ipcMain, net, safeStorage } from 'electron'
+import { app, Notification, clipboard, desktopCapturer, ipcMain, net, safeStorage, session } from 'electron'
 import type { BrowserWindow } from 'electron'
 import { join } from 'path'
 import { existsSync, promises as fsp } from 'fs'
@@ -35,6 +35,8 @@ import { registerIpc } from './ipc'
 import { initLog, log } from './core/logger'
 import { makeKeyCrypto } from './core/key-crypto'
 import { configureServiceFetch, serviceFetch } from './services/http'
+import { configureSpeechProxy } from './services/speech-transport'
+import { backupVoice } from '../shared/voices'
 import { PhoneticsMemory, foreignLang } from './core/phonetics'
 import { PhoneticsService } from './services/phonetics'
 import type { PhoneticsReply } from '../shared/phonetics'
@@ -671,25 +673,30 @@ async function translateScreenRegion(): Promise<void> {
 // озвучивание текста (Stage 2): выделение по Ctrl+C ×2, кнопка «Слушать» в панели
 // перевода, кнопка «Проверить голос» в настройках. Воспроизведение — в скрытом окне
 // recorderWindow (в main-процессе звук играть нечем), управляется через tts:play/tts:control.
-const ttsEndWaiters = new Map<string, () => void>()
-ipcMain.on(IPC.ttsEnded, (_e, payload: { id: string }) => {
+const ttsEndWaiters = new Map<string, (error?: string) => void>()
+ipcMain.on(IPC.ttsEnded, (_e, payload: { id: string; error?: string }) => {
   const waiter = ttsEndWaiters.get(payload.id)
   if (waiter) {
     ttsEndWaiters.delete(payload.id)
-    waiter()
+    waiter(payload.error)
   }
 })
 
 function playInRecorder(mp3: Buffer): Promise<void> {
   const id = `tts-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
   const data = mp3.buffer.slice(mp3.byteOffset, mp3.byteOffset + mp3.byteLength)
-  return new Promise((resolve) => {
-    ttsEndWaiters.set(id, resolve)
+  return new Promise((resolve, reject) => {
+    if (!recorderWindow || recorderWindow.isDestroyed()) {
+      reject(new Error('Не удалось включить звук. Перезапустите программу.'))
+      return
+    }
+    ttsEndWaiters.set(id, (error) => error ? reject(new Error('Не удалось воспроизвести звук. Проверьте колонки или наушники.')) : resolve())
     // устройство шлём с каждым фрагментом: колонки могли выбрать прямо во время чтения
     recorderWindow?.webContents.send(IPC.ttsPlay, {
       id,
       mp3: data,
-      deviceId: settings.get().playbackDeviceId
+      deviceId: settings.get().playbackDeviceId,
+      paused: speakSession?.paused ?? false
     })
   })
 }
@@ -706,6 +713,8 @@ interface SpeakSession {
   paused: boolean
   restart: boolean // сменили голос или темп: текущий фрагмент читаем заново
   startedAt: number // когда начали: панель перевода отличает «слушают из меня» от чтения до неё
+  controller: AbortController
+  preferredVoiceId: string
 }
 
 /** Состояние панели чтения по текущей сессии. */
@@ -746,6 +755,7 @@ async function speakText(text: string, voiceId?: string): Promise<{ ok: boolean;
   const trimmed = text.trim()
   if (!trimmed) return { ok: false, message: 'Нечего озвучивать' }
   const s = settings.get()
+  if (speakSession) speakControl('stop', 'новый текст')
   const voice = voiceId ?? pickVoice(trimmed, s.speakVoiceRu, s.speakVoiceEn)
   const lang: 'ru' | 'en' = voice.startsWith('ru-') ? 'ru' : 'en'
   speakSession = {
@@ -755,8 +765,11 @@ async function speakText(text: string, voiceId?: string): Promise<{ ok: boolean;
     rate: s.speakRate,
     paused: false,
     restart: false,
-    startedAt: Date.now()
+    startedAt: Date.now(),
+    controller: new AbortController(),
+    preferredVoiceId: voice
   }
+  const currentSession = speakSession
   overlaySend(speakingState()!)
   const startedAt = Date.now()
   const chunks = planSpeech(trimmed)
@@ -765,10 +778,24 @@ async function speakText(text: string, voiceId?: string): Promise<{ ok: boolean;
   // засчитывались как полностью прочитанный текст
   let i = 0
   const synth = (idx: number): Promise<Buffer> => {
+    const began = Date.now()
+    const requestedVoice = currentSession.voiceId
     const p = synthesize({
       text: chunks[idx],
-      voice: speakSession?.voiceId ?? voice,
-      rate: settings.get().speakRate
+      voice: currentSession.voiceId,
+      rate: settings.get().speakRate,
+      signal: currentSession.controller.signal,
+      fallbackVoice: backupVoice(requestedVoice),
+      onFallback: (fallback) => {
+        if (speakSession !== currentSession || currentSession.voiceId !== requestedVoice) return
+        currentSession.voiceId = fallback
+        currentSession.voice = `${voiceLabel(fallback)} — запасной голос`
+        log(`озвучка: ${requestedVoice} недоступен, продолжаем голосом ${fallback}`)
+        overlaySend(speakingState()!)
+      }
+    }).then((audio) => {
+      log(`озвучка: фрагмент ${idx + 1}/${chunks.length} готов за ${Date.now() - began} мс, ${audio.length} б`)
+      return audio
     })
     p.catch(() => {}) // прерванный синтез не должен всплывать необработанным отказом
     return p
@@ -780,10 +807,10 @@ async function speakText(text: string, voiceId?: string): Promise<{ ok: boolean;
       synth,
       play: playInRecorder,
       minBytes: MIN_SPEECH_BYTES,
-      active: () => speakSession !== null,
-      restarted: () => speakSession?.restart === true,
+      active: () => speakSession === currentSession,
+      restarted: () => currentSession.restart,
       clearRestart: () => {
-        if (speakSession) speakSession.restart = false
+        currentSession.restart = false
       },
       onFirst: () => log(`озвучка: первый фрагмент за ${Date.now() - startedAt} мс`),
       // считаем по ходу, а не по возврату: при сбое голоса возврата не будет,
@@ -794,6 +821,7 @@ async function speakText(text: string, voiceId?: string): Promise<{ ok: boolean;
       log
     })
   } catch (err) {
+    if (speakSession !== currentSession) return { ok: true }
     const message = err instanceof Error ? err.message : 'Не удалось получить голос'
     // подробность от сервиса приходит по-английски: ей место в журнале, не на экране
     const detail = err instanceof SpeechError ? ` (${err.detail})` : ''
@@ -802,6 +830,7 @@ async function speakText(text: string, voiceId?: string): Promise<{ ok: boolean;
     overlaySend({ phase: 'error', message })
     return { ok: false, message }
   } finally {
+    currentSession.controller.abort()
     // сюда попадаем и при удачном чтении, и при «Стоп», и при сбое синтеза
     const chars = spokenChars(chunks, i)
     if (chars > 0) {
@@ -809,7 +838,7 @@ async function speakText(text: string, voiceId?: string): Promise<{ ok: boolean;
       log(`озвучка: прочитано фрагментов ${i} из ${chunks.length}, символов ${chars}`)
     }
   }
-  if (speakSession) {
+  if (speakSession === currentSession) {
     speakSession = null
     overlayAfterSpeech()
   }
@@ -822,6 +851,7 @@ function speakControl(action: 'pause' | 'resume' | 'stop', why = 'кнопка')
     // без этой записи оборванное чтение неотличимо от «дочитал»: разбирая жалобу,
     // невозможно понять, кто именно погасил сессию
     log(`озвучка: остановлена (${why})`)
+    speakSession.controller.abort()
     controlPlayback('stop')
     speakSession = null
     overlayAfterSpeech()
@@ -833,7 +863,9 @@ function speakControl(action: 'pause' | 'resume' | 'stop', why = 'кнопка')
 }
 
 /** Двойное нажатие speakHotkey: захватить выделение в чужом окне и озвучить его. */
+let capturingSpeech = false
 async function handleSpeakTap(): Promise<void> {
+  if (capturingSpeech) return
   log('озвучка: двойное нажатие поймано')
   // повторное нажатие во время чтения = «стоп», а не вторая озвучка поверх первой
   if (speakSession) {
@@ -842,14 +874,23 @@ async function handleSpeakTap(): Promise<void> {
   }
   // глушим собственный Ctrl+C, иначе он снова запустит озвучку; ждём, пока
   // пользователь отпустит клавиши — по зажатому Ctrl копирование срывается
-  hotkeys.suppress(2000)
-  // соединение с сервисом синтеза поднимаем параллельно захвату текста
-  void warmUp(settings.get().speakVoiceRu)
-  await hotkeys.waitKeysReleased()
-  const text = await captureSelection({ clipboard, sendCopy: makeUiohookCopy() })
+  capturingSpeech = true
+  let text: string
+  try {
+    hotkeys.suppress(2000)
+    // соединение с сервисом синтеза поднимаем параллельно захвату текста
+    void warmUp(settings.get().speakVoiceRu)
+    await hotkeys.waitKeysReleased()
+    text = await captureSelection({ clipboard, sendCopy: makeUiohookCopy() })
+  } catch (err) {
+    log(`озвучка: ошибка захвата — ${err instanceof Error ? err.message : String(err)}`)
+    overlaySend({ phase: 'error', message: 'Не удалось скопировать выделение. Нажмите Ctrl+C и попробуйте снова.' })
+    return
+  } finally {
+    capturingSpeech = false
+  }
   log(`озвучка: захвачено символов ${text.trim().length}`)
   if (!text.trim()) {
-    // молчание сбивает с толку: показываем подсказку, что именно пошло не так
     overlaySend({ phase: 'error', message: 'Текст не выделен' })
     return
   }
@@ -983,14 +1024,19 @@ function applySettingsSideEffects(): void {
   // настройки (например, темпа речи из панели чтения) закрывала бы саму панель
   if (speakSession) {
     const preferred = speakSession.lang === 'ru' ? s.speakVoiceRu : s.speakVoiceEn
-    const changed = preferred !== speakSession.voiceId || s.speakRate !== speakSession.rate
-    speakSession.voiceId = preferred
-    speakSession.voice = voiceLabel(preferred)
+    const changed = preferred !== speakSession.preferredVoiceId || s.speakRate !== speakSession.rate
+    speakSession.preferredVoiceId = preferred
+    if (changed) {
+      speakSession.voiceId = preferred
+      speakSession.voice = voiceLabel(preferred)
+    }
     speakSession.rate = s.speakRate
     overlaySend(speakingState()!)
     if (changed) {
       // прерываем текущий фрагмент: цикл чтения перечитает его новым голосом
       speakSession.restart = true
+      speakSession.controller.abort()
+      speakSession.controller = new AbortController()
       speakSession.paused = false
       controlPlayback('stop')
     }
@@ -1036,6 +1082,7 @@ app.on('window-all-closed', () => {
 
 void app.whenReady().then(() => {
   configureServiceFetch((input, init) => net.fetch(input instanceof URL ? input.href : input, init))
+  configureSpeechProxy((url) => session.defaultSession.resolveProxy(url))
   setupPermissions()
   recorderWindow = createRecorderWindow()
   overlayWindow = createOverlayWindow()

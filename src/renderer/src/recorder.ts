@@ -199,25 +199,28 @@ async function routeTo(audio: HTMLAudioElement, deviceId: string): Promise<void>
 }
 
 api.on('tts:play', async (payload) => {
-  const { id, mp3, deviceId } = payload as { id: string; mp3: ArrayBuffer; deviceId?: string }
+  const { id, mp3, deviceId, paused } = payload as { id: string; mp3: ArrayBuffer; deviceId?: string; paused?: boolean }
   rememberOutput(deviceId)
   ttsCleanup()
+  ttsPaused = paused ?? false
   ttsId = id
   ttsUrl = URL.createObjectURL(new Blob([mp3], { type: 'audio/mpeg' }))
   const audio = new Audio(ttsUrl)
   ttsAudio = audio
-  const finish = (): void => {
-    const finishedId = ttsId
+  const finish = (error?: string): void => {
+    if (ttsAudio !== audio) return
     ttsCleanup()
-    if (finishedId) api.ttsEnded({ id: finishedId })
+    api.ttsEnded({ id, error })
   }
-  audio.onended = finish
-  audio.onerror = finish
+  audio.onended = () => finish()
+  audio.onerror = () => finish('Ошибка воспроизведения')
   await routeTo(audio, outputDeviceId)
   // пока выбиралось устройство, фрагмент могли остановить, сменить или поставить
   // на паузу: играть старый было бы наложением двух голосов, а на паузе — побегом
   if (ttsAudio !== audio || ttsPaused) return
-  void audio.play()
+  void audio.play().catch((err: Error) => {
+    if (!ttsPaused && ttsAudio === audio) finish(err.message)
+  })
 })
 
 api.on('tts:control', (payload) => {
@@ -228,7 +231,13 @@ api.on('tts:control', (payload) => {
     ttsAudio.pause()
   } else if (action === 'resume') {
     ttsPaused = false
-    void ttsAudio.play()
+    const audio = ttsAudio
+    const id = ttsId
+    void audio.play().catch((err: Error) => {
+      if (ttsAudio !== audio || ttsPaused) return
+      ttsCleanup()
+      if (id) api.ttsEnded({ id, error: err.message })
+    })
   } else if (action === 'stop') {
     const stoppedId = ttsId
     ttsCleanup()

@@ -18,6 +18,60 @@ function fakeClipboard(initial: string) {
 }
 
 describe('captureSelection', () => {
+  it('Windows обрезает NUL, а копирование приходит позже первого опроса', async () => {
+    let clip = 'старое'
+    let ticks = 0
+    const result = await captureSelection({
+      clipboard: { readText: () => clip, writeText: (text) => { clip = text.split('\0')[0] } },
+      sendCopy: async () => {},
+      delay: async () => { if (++ticks === 5) clip = 'выделено в Windows' }
+    })
+    expect(result).toBe('выделено в Windows')
+    expect(clip).toBe('старое')
+  })
+
+  it('промежуточное очищение буфера не считается завершением копирования', async () => {
+    const f = fakeClipboard('старое')
+    let ticks = 0
+    const result = await captureSelection({
+      clipboard: f.clipboard,
+      sendCopy: async () => f.setClip(''),
+      delay: async () => { if (++ticks === 3) f.setClip('выделено') }
+    })
+    expect(result).toBe('выделено')
+  })
+
+  it('ошибка нажатия не оставляет служебную метку в буфере', async () => {
+    const f = fakeClipboard('старое')
+    await expect(captureSelection({
+      clipboard: f.clipboard,
+      sendCopy: async () => { throw new Error('ошибка клавиатуры') }
+    })).rejects.toThrow('ошибка клавиатуры')
+    expect(f.getClip()).toBe('старое')
+  })
+
+  it('одновременные захваты не подменяют метку и прежний буфер друг друга', async () => {
+    const f = fakeClipboard('старое')
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const order: number[] = []
+    const first = captureSelection({
+      clipboard: f.clipboard,
+      sendCopy: async () => { order.push(1); await gate; f.setClip('первое') },
+      delay: async () => {}
+    })
+    const second = captureSelection({
+      clipboard: f.clipboard,
+      sendCopy: async () => { order.push(2); f.setClip('второе') },
+      delay: async () => {}
+    })
+    await Promise.resolve()
+    expect(order).toEqual([1])
+    release()
+    expect(await Promise.all([first, second])).toEqual(['первое', 'второе'])
+    expect(f.getClip()).toBe('старое')
+  })
+
   it('копирование сработало -> возвращает текст и восстанавливает прежний буфер', async () => {
     const f = fakeClipboard('старое')
     const r = await captureSelection({

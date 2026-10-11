@@ -29,6 +29,12 @@ export function voiceLabel(id: string): string {
   return VOICES.find((v) => v.id === id)?.label ?? id
 }
 
+/** Голос бывает в списке сервиса, но временно не отвечает — чтение продолжим другим. */
+export function backupVoice(id: string): string | undefined {
+  const source = VOICES.find((voice) => voice.id === id)
+  return source && VOICES.find((voice) => voice.lang === source.lang && voice.id !== id)?.id
+}
+
 /**
  * Выбирает голос по доле кириллицы в тексте: кириллица > 0.3 -> русский голос,
  * иначе английский. Чистая функция, без обращения к сети.

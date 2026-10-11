@@ -40,33 +40,50 @@ export interface SpeechLoopDeps {
  */
 export async function runSpeechLoop(deps: SpeechLoopDeps): Promise<number> {
   let done = 0
-  // предзагрузка всегда относится к следующему фрагменту (done + 1)
-  let ahead: Promise<Buffer> | null = null
+  const ready = new Map<number, Promise<Buffer>>()
+  const prepare = (index: number): Promise<Buffer> => {
+    let result = ready.get(index)
+    if (!result) {
+      result = deps.synth(index)
+      result.catch(() => {})
+      ready.set(index, result)
+    }
+    return result
+  }
 
   while (done < deps.chunks.length && deps.active()) {
-    const current = ahead ?? deps.synth(done)
-    ahead = done + 1 < deps.chunks.length ? deps.synth(done + 1) : null
-    // брошенную предзагрузку («Стоп» посреди фрагмента) никто не дождётся —
-    // гасим её отказ здесь, иначе он всплывёт необработанным
-    ahead?.catch(() => {})
-    let part = await current
-
-    if (part.length < deps.minBytes && deps.active()) {
-      deps.log?.(`озвучка: фрагмент ${done} пришёл пустым (${part.length} б) — повтор`)
-      part = await deps.synth(done)
+    deps.clearRestart()
+    const current = prepare(done)
+    if (done + 1 < deps.chunks.length) prepare(done + 1)
+    let part: Buffer
+    try {
+      part = await current
+      if (part.length < deps.minBytes && deps.active() && !deps.restarted()) {
+        deps.log?.(`озвучка: фрагмент ${done} пришёл пустым (${part.length} б) — повтор`)
+        part = await deps.synth(done)
+      }
+    } catch (err) {
+      if (!deps.active()) break
+      if (!deps.restarted()) throw err
+      ready.clear()
+      continue
     }
     if (!deps.active()) break
+    if (deps.restarted()) { ready.clear(); continue }
+    // Первый короткий кусок уже готов: освобождённое соединение заранее готовит
+    // ещё один. Так сетевой скачок не оставляет паузу после следующей точки.
+    if (done + 2 < deps.chunks.length) prepare(done + 2)
 
     if (done === 0) deps.onFirst?.()
-    deps.clearRestart()
     await deps.play(part)
 
     if (deps.restarted()) {
       // этот же фрагмент читаем заново; уже начатая предзагрузка не годится —
       // она синтезирована прежним голосом
-      ahead = null
+      ready.clear()
       continue
     }
+    ready.delete(done)
     done++
     deps.onProgress?.(done)
   }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { Readable } from 'stream'
 import {
   planSpeech,
@@ -7,7 +7,8 @@ import {
   synthesize,
   synthesizeParts,
   ssmlSafe,
-  SpeechError
+  SpeechError,
+  warmUp
 } from '../src/main/services/tts'
 import type { TtsFactory, TtsClient } from '../src/main/services/tts'
 
@@ -205,6 +206,134 @@ function makeFakeFactory(mp3Bytes: Buffer, opts?: { failSetMetadata?: boolean; f
 }
 
 beforeEach(() => resetTtsConnection())
+afterEach(() => { resetTtsConnection(); vi.useRealTimers() })
+
+describe('жизненный цикл соединения голоса', () => {
+  it('два отказа выбранного голоса включают запасной и сообщают его только после успеха', async () => {
+    const voices: string[] = []
+    const fallback = vi.fn()
+    const factory: TtsFactory = () => {
+      let voice = ''
+      return {
+        setMetadata: async (name) => { voice = name; voices.push(name) },
+        toStream: () => {
+          const stream = new Readable({ read() {} })
+          process.nextTick(() => {
+            if (voice === 'ru-RU-DmitryNeural') stream.destroy(new Error('голос не отвечает'))
+            else { stream.push('запасной звук'); stream.push(null) }
+          })
+          return { audioStream: stream }
+        }
+      }
+    }
+    const audio = await synthesize({ text: 'текст', voice: 'ru-RU-DmitryNeural',
+      fallbackVoice: 'ru-RU-SvetlanaNeural', onFallback: fallback, ttsFactory: factory })
+    expect(audio.toString()).toBe('запасной звук')
+    expect(voices).toEqual(['ru-RU-DmitryNeural', 'ru-RU-DmitryNeural', 'ru-RU-SvetlanaNeural'])
+    expect(fallback).toHaveBeenCalledWith('ru-RU-SvetlanaNeural')
+  })
+
+  it('отказ обоих голосов ограничен 24 секундами, а ложного сообщения о замене нет', async () => {
+    vi.useFakeTimers()
+    const fallback = vi.fn()
+    const close = vi.fn()
+    const factory = vi.fn(() => ({
+      setMetadata: () => new Promise<void>(() => {}), close,
+      toStream: () => ({ audioStream: new Readable({ read() {} }) })
+    }))
+    const assertion = expect(synthesize({ text: 'текст', voice: 'ru-RU-DmitryNeural',
+      fallbackVoice: 'ru-RU-SvetlanaNeural', onFallback: fallback, ttsFactory: factory })).rejects.toThrow('Не удалось получить голос')
+    await vi.advanceTimersByTimeAsync(24_000)
+    await assertion
+    expect(factory).toHaveBeenCalledTimes(3)
+    expect(close).toHaveBeenCalledTimes(3)
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
+  it('обрыв без события end сразу повторяется в новом соединении', async () => {
+    let attempts = 0
+    const close = vi.fn()
+    const factory: TtsFactory = () => ({
+      setMetadata: async () => {}, close,
+      toStream() {
+        const stream = new Readable({ read() {} })
+        if (++attempts === 1) process.nextTick(() => stream.destroy())
+        else process.nextTick(() => { stream.push('звук'); stream.push(null) })
+        return { audioStream: stream }
+      }
+    })
+    expect((await synthesize({ text: 'текст', voice: 'ru-RU-SvetlanaNeural', ttsFactory: factory })).toString()).toBe('звук')
+    expect(attempts).toBe(2)
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('зависшее подключение закрывается через 12 секунд и повторяется один раз', async () => {
+    vi.useFakeTimers()
+    const close = vi.fn()
+    const factory = vi.fn(() => ({
+      setMetadata: () => new Promise<void>(() => {}), close,
+      toStream: () => ({ audioStream: new Readable({ read() {} }) })
+    }))
+    const result = synthesize({ text: 'текст', voice: 'ru-RU-SvetlanaNeural', ttsFactory: factory })
+    const assertion = expect(result).rejects.toThrow('Не удалось получить голос')
+    await vi.advanceTimersByTimeAsync(24_000)
+    await assertion
+    expect(factory).toHaveBeenCalledTimes(2)
+    expect(close).toHaveBeenCalledTimes(2)
+  })
+
+  it('остановка во время загрузки голоса закрывает запрос без повторного подключения', async () => {
+    const controller = new AbortController()
+    const close = vi.fn()
+    let started!: () => void
+    const ready = new Promise<void>((resolve) => { started = resolve })
+    const factory = vi.fn(() => ({
+      setMetadata: async () => { started(); await new Promise<void>(() => {}) }, close,
+      toStream: () => ({ audioStream: new Readable({ read() {} }) })
+    }))
+    const result = synthesize({ text: 'текст', voice: 'ru-RU-SvetlanaNeural', ttsFactory: factory, signal: controller.signal })
+    const assertion = expect(result).rejects.toThrow('Чтение остановлено')
+    await ready
+    controller.abort()
+    await assertion
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(factory).toHaveBeenCalledTimes(1)
+  })
+
+  it('закрытый во время простоя сокет не используется для следующего фрагмента', async () => {
+    let live = true
+    let created = 0
+    const close = vi.fn()
+    const factory: TtsFactory = () => {
+      created++
+      return {
+        setMetadata: async () => {}, close, isReady: () => live,
+        toStream: () => ({ audioStream: Readable.from([Buffer.from('звук')]) })
+      }
+    }
+    await synthesize({ text: 'текст', voice: 'ru-RU-SvetlanaNeural', ttsFactory: factory })
+    live = false
+    await synthesize({ text: 'ещё текст', voice: 'ru-RU-SvetlanaNeural', ttsFactory: factory })
+    expect(created).toBe(2)
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('неудачный прогрев не сбрасывает исправное соединение', async () => {
+    const close = vi.fn()
+    const factory = vi.fn(() => ({
+      setMetadata: async () => {}, close,
+      toStream: () => ({ audioStream: Readable.from([Buffer.from('звук')]) })
+    }))
+    await synthesize({ text: 'текст', voice: 'ru-RU-SvetlanaNeural', ttsFactory: factory })
+    await warmUp('другой голос', () => ({
+      setMetadata: async () => { throw new Error('сеть') },
+      toStream: () => ({ audioStream: new Readable({ read() {} }) })
+    }))
+    await synthesize({ text: 'текст', voice: 'ru-RU-SvetlanaNeural', ttsFactory: factory })
+    expect(factory).toHaveBeenCalledTimes(1)
+    expect(close).not.toHaveBeenCalled()
+  })
+})
 
 describe('synthesize (с фейковой фабрикой)', () => {
   it('в сервис уходит уже экранированный текст', async () => {
