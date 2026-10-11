@@ -65,7 +65,7 @@ const api = {
   speakText: (text: string, voice?: string) => ipcRenderer.invoke(IPC.speakText, { text, voice }),
   speakControl: (action: 'pause' | 'resume' | 'stop') =>
     ipcRenderer.invoke(IPC.speakControl, { action }),
-  ttsEnded: (p: { id: string }) => ipcRenderer.send(IPC.ttsEnded, p),
+  ttsEnded: (p: { id: string; error?: string }) => ipcRenderer.send(IPC.ttsEnded, p),
   openMain: (tab?: string) => ipcRenderer.invoke(IPC.openMain, tab),
   dictateToggle: () => ipcRenderer.invoke(IPC.dictateToggle),
   speakSelection: () => ipcRenderer.invoke(IPC.speakSelection),

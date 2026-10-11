@@ -1,5 +1,6 @@
-import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts'
+import { OUTPUT_FORMAT } from 'msedge-tts'
 import type { Readable } from 'stream'
+import { createSpeechClient } from './speech-transport'
 
 export { RU_VOICES, EN_VOICES, VOICES, pickVoice, voiceLabel } from '../../shared/voices'
 // резка по предложениям живёт в core/: она нужна и переводу, а тому нечего делать в синтезе речи
@@ -7,7 +8,8 @@ import { splitForTts } from '../core/text-split'
 export { splitForTts } from '../core/text-split'
 export type { VoiceInfo } from '../../shared/voices'
 
-const SYNTH_TIMEOUT_MS = 60_000
+const SYNTH_TIMEOUT_MS = 12_000
+const POOL_IDLE_MS = 15_000
 /** Верхняя граница текста за раз: дальше синтез затягивается и рвётся по таймауту. */
 export const MAX_SPEAK_CHARS = 6000
 /**
@@ -21,10 +23,12 @@ export const MIN_SPEECH_BYTES = 400
 export interface TtsClient {
   setMetadata(voiceName: string, outputFormat: OUTPUT_FORMAT): Promise<void>
   toStream(input: string, options?: { rate?: string }): { audioStream: Readable }
+  close?(): void
+  isReady?(): boolean
 }
-export type TtsFactory = () => TtsClient
+export type TtsFactory = () => TtsClient | Promise<TtsClient>
 
-const defaultFactory: TtsFactory = () => new MsEdgeTTS() as unknown as TtsClient
+const defaultFactory: TtsFactory = createSpeechClient
 
 /**
  * Пул соединений с сервисом синтеза. Каждое соединение обслуживает ТОЛЬКО ОДИН
@@ -38,33 +42,32 @@ interface Pooled {
   voice: string
   client: TtsClient
   factory: TtsFactory
+  releasedAt: number
+  generation: number
 }
 let pool: Pooled[] = []
-
-async function acquire(voice: string, factory: TtsFactory): Promise<Pooled> {
-  const i = pool.findIndex((p) => p.voice === voice && p.factory === factory)
-  if (i !== -1) return pool.splice(i, 1)[0]
-  const client = factory()
-  await client.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
-  return { voice, client, factory }
-}
+let generation = 0
 
 function release(p: Pooled): void {
-  // держим не больше двух соединений: глубина предзагрузки — один фрагмент
-  if (pool.length < 2) pool.push(p)
+  if (pool.length < 2 && p.generation === generation) {
+    p.releasedAt = Date.now()
+    pool.push(p)
+  } else p.client.close?.()
 }
 
 /** Сбрасывает пул соединений (тесты, смена сети). */
 export function resetTtsConnection(): void {
+  generation++
+  for (const p of pool) p.client.close?.()
   pool = []
 }
 
 /** Заранее поднимает соединение, чтобы первый фрагмент не ждал рукопожатия. */
 export async function warmUp(voice: string, ttsFactory?: TtsFactory): Promise<void> {
   try {
-    release(await acquire(voice, ttsFactory ?? defaultFactory))
+    await runAttempt(voice, ttsFactory ?? defaultFactory, true, async () => undefined)
   } catch {
-    resetTtsConnection()
+    // Неудачный прогрев не должен закрывать исправный голос другой сессии.
   }
 }
 
@@ -90,22 +93,54 @@ function streamToBuffer(stream: Readable): Promise<Buffer> {
     stream.on('data', (c: Buffer | string) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)))
     stream.on('end', () => resolve(Buffer.concat(chunks)))
     stream.on('error', reject)
+    stream.on('close', () => {
+      if (!stream.readableEnded) reject(new Error('Поток голоса оборван'))
+    })
   })
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+function runAttempt<T>(voice: string, factory: TtsFactory, reuse: boolean,
+  work: (client: TtsClient) => Promise<T>, signal?: AbortSignal, timeoutMs = SYNTH_TIMEOUT_MS): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Превышено время ожидания ответа')), ms)
-    p.then(
-      (v) => {
-        clearTimeout(timer)
-        resolve(v)
-      },
-      (e) => {
-        clearTimeout(timer)
-        reject(e)
-      }
-    )
+    let client: TtsClient | undefined
+    let finished = false
+    const cleanup = (): void => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
+    }
+    const fail = (err: unknown): void => {
+      if (finished) return
+      finished = true
+      cleanup()
+      client?.close?.()
+      reject(err)
+    }
+    const abort = (): void => fail(new Error('Чтение остановлено'))
+    const timer = setTimeout(() => fail(new Error('Превышено время ожидания голоса')), timeoutMs)
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) { abort(); return }
+    const attemptGeneration = generation
+    void (async () => {
+      // Старые сокеты нельзя проверять запросом: их внутреннее переподключение
+      // оставляло поток висеть. Отбрасываем их до отправки текста.
+      pool = pool.filter((p) => {
+        if (Date.now() - p.releasedAt <= POOL_IDLE_MS && (p.client.isReady?.() ?? true)) return true
+        p.client.close?.()
+        return false
+      })
+      const idx = reuse ? pool.findIndex((p) => p.voice === voice && p.factory === factory) : -1
+      const pooled = idx >= 0 ? pool.splice(idx, 1)[0] : undefined
+      client = pooled?.client ?? await factory()
+      if (finished) { client.close?.(); return }
+      if (!pooled) await client.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
+      if (finished) { client.close?.(); return }
+      const result = await work(client)
+      if (finished) { client.close?.(); return }
+      finished = true
+      cleanup()
+      release({ voice, client, factory, releasedAt: Date.now(), generation: attemptGeneration })
+      resolve(result)
+    })().catch(fail)
   })
 }
 
@@ -150,36 +185,36 @@ export async function synthesize(opts: {
   voice: string
   rate?: number
   ttsFactory?: TtsFactory
+  signal?: AbortSignal
+  fallbackVoice?: string
+  onFallback?: (voice: string) => void
 }): Promise<Buffer> {
   const factory = opts.ttsFactory ?? defaultFactory
   // rate в процентах: msedge-tts принимает относительный процент строкой ("+25%")
   const rate = opts.rate ? `${opts.rate > 0 ? '+' : ''}${opts.rate}%` : undefined
   // в сервис уходит только безопасная для разметки версия текста
   const text = ssmlSafe(opts.text)
-  const run = async (reuse: boolean): Promise<Buffer> => {
-    const pooled = reuse
-      ? await acquire(opts.voice, factory)
-      : await (async () => {
-          const fresh = factory()
-          await fresh.setMetadata(opts.voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
-          return { voice: opts.voice, client: fresh, factory }
-        })()
-    try {
-      const { audioStream } = pooled.client.toStream(text, rate ? { rate } : undefined)
-      const buf = await streamToBuffer(audioStream)
-      release(pooled) // соединение исправно — вернём его следующему фрагменту
-      return buf
-    } catch (err) {
-      throw err // клиент в пул не возвращаем: его состояние могло испортиться
-    }
-  }
+  const run = (reuse: boolean, voice = opts.voice, timeoutMs = SYNTH_TIMEOUT_MS): Promise<Buffer> => runAttempt(voice, factory, reuse,
+    (client) => streamToBuffer(client.toStream(text, rate ? { rate } : undefined).audioStream), opts.signal, timeoutMs)
   try {
-    return await withTimeout(run(true), SYNTH_TIMEOUT_MS)
+    return await run(true, opts.voice, opts.fallbackVoice ? 8000 : SYNTH_TIMEOUT_MS)
   } catch {
+    if (opts.signal?.aborted) throw new Error('Чтение остановлено')
     // соединение могло закрыться по таймауту сервиса — одна попытка с новым
     try {
-      return await withTimeout(run(false), SYNTH_TIMEOUT_MS)
+      return await run(false, opts.voice, opts.fallbackVoice ? 4000 : SYNTH_TIMEOUT_MS)
     } catch (err) {
+      if (opts.signal?.aborted) throw new Error('Чтение остановлено')
+      if (opts.fallbackVoice && opts.fallbackVoice !== opts.voice) {
+        try {
+          // Запасной голос укладывается в тот же общий предел 24 секунды.
+          const audio = await run(true, opts.fallbackVoice)
+          opts.onFallback?.(opts.fallbackVoice)
+          return audio
+        } catch (fallbackError) {
+          throw new SpeechError(fallbackError instanceof Error ? fallbackError.message : String(fallbackError))
+        }
+      }
       throw new SpeechError(err instanceof Error ? err.message : String(err))
     }
   }

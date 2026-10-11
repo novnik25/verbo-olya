@@ -236,9 +236,9 @@ export const IPC = {
   translateSelection: 'translate:selection', // overlay → main, перевести выделенный текст
   speakText: 'speak:text',           // renderer → main, {text, voice?} — озвучить текст
   speakControl: 'speak:control',     // overlay → main, {action: 'pause'|'resume'|'stop'}
-  ttsPlay: 'tts:play',               // main → recorder, {id, mp3: ArrayBuffer}
+  ttsPlay: 'tts:play',               // main → recorder, {id, mp3: ArrayBuffer, paused?}
   ttsControl: 'tts:control',         // main → recorder, {action: 'pause'|'resume'|'stop'}
-  ttsEnded: 'tts:ended',             // recorder → main, {id}
+  ttsEnded: 'tts:ended',             // recorder → main, {id, error?}
   localStatus: 'local:status',
   localDownload: 'local:download',
   localGpu: 'local:gpu', // установка GPU-сборки (cublas/CUDA) поверх уже установленного CPU-движка

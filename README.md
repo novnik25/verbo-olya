@@ -23,9 +23,13 @@
 
 ## Установка
 
-**[Скачать последнюю версию для Windows](https://github.com/novnik25/verbo-olya/releases/latest)** —
-внизу страницы, в разделе Assets, нажми файл `Verbo-Olya-Setup-<версия>.exe`.
+**[Скачать установщик 1.0.3 для Windows](https://github.com/novnik25/verbo-olya/releases/download/v1.0.3/Verbo-Olya-Setup-1.0.3.exe)**.
+Все версии доступны на странице [Releases](https://github.com/novnik25/verbo-olya/releases/latest).
 Установщик находится в Releases, а не среди папок с исходным кодом.
+
+В версии 1.0.3 исправлено получение выделенного текста и ожидание голоса между
+абзацами. Если выбранный голос временно недоступен, программа продолжает другим
+голосом того же языка; выбор в настройках сохраняется. Для чтения нужен интернет.
 
 1. Скачай `Verbo-Olya-Setup-<версия>.exe` в разделе
    [Releases](https://github.com/novnik25/verbo-olya/releases/latest)

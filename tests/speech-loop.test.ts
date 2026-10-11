@@ -53,6 +53,29 @@ function стенд(opts: {
 }
 
 describe('цикл чтения вслух', () => {
+  it('два следующих фрагмента готовятся до окончания первого', async () => {
+    const s = стенд({ chunks: ['раз', 'два', 'три'] })
+    await s.итог
+    expect(s.события.indexOf('синтез:2#1')).toBeLessThan(s.события.indexOf('игра:0'))
+  })
+
+  it('смена голоса во время синтеза не проигрывает прежний голос', async () => {
+    let restart = false
+    let attempt = 0
+    const played: string[] = []
+    const done = await runSpeechLoop({
+      chunks: ['текст'], minBytes: 1, active: () => true,
+      restarted: () => restart, clearRestart: () => { restart = false },
+      synth: async () => {
+        if (++attempt === 1) { restart = true; throw new Error('старый запрос отменён') }
+        return Buffer.from('новый голос')
+      },
+      play: async (audio) => { played.push(audio.toString()) }
+    })
+    expect(done).toBe(1)
+    expect(played).toEqual(['новый голос'])
+  })
+
   it('дочитывает все фрагменты и сообщает их число', async () => {
     const s = стенд({ chunks: ['раз', 'два', 'три'] })
     expect(await s.итог).toBe(3)
